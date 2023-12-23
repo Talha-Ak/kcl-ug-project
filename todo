@@ -1,0 +1,5 @@
+Create env type
+Ref env type in the lambda (easy)
+Ref env type in the call site (hard)
+ - create map containing fn name -> env type?
+ - type all functions?
