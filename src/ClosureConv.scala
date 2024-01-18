@@ -28,16 +28,23 @@ object ClosureConv {
 
     def convert(e: KAnf): KAnf = e match {
         case KFun(fnName, args, body, in) => {
+            println("Running on " + fnName)
             val env = Fresh("env")
             val fvs = (free_anf(body) -- args).toList
             println(s"The free variables in $fnName are $fvs")
+
+            def convertLocalToEnvRef(next: KAnf, i: Int)(ssaVar: String): (KAnf, Int) = {
+                (KLet(ssaVar, KEnvRef(env, i), next), i + 1)
+            }
+
             val (body2, _) = fvs.zipWithIndex.foldLeft((convert(body), 1)) {
                 // LET x = env[i] IN anf
-                case ((anf, i), x) => (KLet(x._1, KEnvRef(env, i), anf), i+1)
+                case ((anf, i), x) => convertLocalToEnvRef(anf, i)(x._1)
             }
+
             val vs = fvs.map(KVar)
             // LET fn = (@fn, fvs...) IN anf
-            val in2 = KLet(fnName, KEnv(KFnPointer(fnName) :: vs), in)
+            val in2 = KLet(fnName, KEnv(KFnPointer(fnName) :: vs), convert(in))
             KFun(fnName, env +: args, body2, in2)
         }
         case KLet(x, KCall(fn, vrs), e2) => {
