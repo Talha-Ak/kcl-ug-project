@@ -30,12 +30,10 @@ object NewCPS {
     }
     case class KIf(v: String, e1: KAnf, e2: KAnf) extends KAnf {
         def pad(e: KAnf) = e.toString.replaceAll("(?m)^", "  ")
-        override def toString = 
-            s"IF $v\nTHEN\n${pad(e1)}\nELSE\n${pad(e2)}"
+        override def toString = s"IF $v\nTHEN\n${pad(e1)}\nELSE\n${pad(e2)}"
     }
     case class KFun(fnName: String, args: Seq[String], body: KAnf, in: KAnf) extends KAnf {
-        override def toString = 
-            s"FUN $fnName($args): \n$body\n f-in \n$in"
+        override def toString = s"FUN $fnName($args): \n$body\n f-in \n$in"
     }
     case class KReturn(v: KVal) extends KAnf {
         override def toString = s"RETURN $v"

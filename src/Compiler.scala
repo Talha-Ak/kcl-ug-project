@@ -67,17 +67,17 @@ object Compiler {
 
     // mathematical and boolean operations
     def compile_op(op: String) = op match {
-        case "+" => "add i32 "
-        case "*" => "mul i32 "
-        case "-" => "sub i32 "
-        case "/" => "sdiv i32 "
-        case "%" => "srem i32 "
-        case "==" => "icmp eq i32 "
-        case "!=" => "icmp ne i32 "
-        case "<=" => "icmp sle i32 "
-        case "<"  => "icmp slt i32 "
-        case ">=" => "icmp sge i32 "
-        case ">"  => "icmp sgt i32 "
+        case "+" => "add i32"
+        case "*" => "mul i32"
+        case "-" => "sub i32"
+        case "/" => "sdiv i32"
+        case "%" => "srem i32"
+        case "==" => "icmp eq i32"
+        case "!=" => "icmp ne i32"
+        case "<=" => "icmp sle i32"
+        case "<"  => "icmp slt i32"
+        case ">=" => "icmp sge i32"
+        case ">"  => "icmp sgt i32"
     }
 
     // compile K values
@@ -176,10 +176,7 @@ define i32 @printInt(i32 %x) {
         println(closure)
         println("################")
         val (cfunc, anf) = hoist(closure)
-        val output = cfunc.map(compile_cfunc).mkString("\n") ++
-           m"define i32 @main() {" ++
-            compile_anf(anf) ++
-           m"}\n"
+        val output = (cfunc :+ CFunc("main", Nil, anf)).map(compile_cfunc).mkString("\n")
         output
 
         // val hoisted = hoist(closure)
