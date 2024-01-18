@@ -84,7 +84,7 @@ object Compiler {
     def compile_val(v: KVal) : String = v match {
         case KNum(i) => s"$i"
         case KVar(s) => s"%$s"
-        case KFnPointer(s) => s"@${s}_fnpointer"
+        case KFnPointer(s) => s"@${s}"
     }
 
     // compile K expressions
@@ -94,7 +94,7 @@ object Compiler {
         case KEnvRef(env, idx) => s"kenv_ref $env, $idx"
         case KCall(o, vrs) => {
             val vs = vrs.map(compile_val).mkString("i32 ", ", i32 ", "")
-            s"call i32 @${o}_tmp($vs)"
+            s"call i32 @${o}($vs)"
         }
         case Kop(op, x1, x2) => 
             s"${compile_op(op)} ${compile_val(x1)}, ${compile_val(x2)}"
