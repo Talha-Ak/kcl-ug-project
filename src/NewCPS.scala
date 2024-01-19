@@ -15,16 +15,13 @@ object NewCPS {
     sealed trait KVal
     case class KVar(s: String) extends KVal
     case class KNum(i: Int) extends KVal
-    case class KFnPointer(s: String) extends KVal
 
     sealed trait KExp
     case class Kop(o: String, v1: KVal, v2: KVal) extends KExp
     case class KCall(o: String, vrs: Seq[KVal]) extends KExp
-    case class KEnv(vals: Seq[KVal]) extends KExp
-    case class KEnvRef(env: String, idx: Int) extends KExp
     case class KExpVal(v: KVal) extends KExp
 
-    sealed trait KAnf
+    trait KAnf
     case class KLet(x: String, e1: KExp, e2: KAnf) extends KAnf {
     override def toString = s"LET $x = $e1 in \n$e2" 
     }
@@ -49,9 +46,11 @@ object NewCPS {
             CPS(e1)(y1 => 
             CPS(e2)(y2 => KLet(z, Kop(o, y1, y2), k(KVar(z)))))
         }
-        case If(op, e1, e2) => {
+        case If(Op(b1, o, b2), e1, e2) => {
             val z = Fresh("tmp")
-            CPS(op)(y1 => KLet(z, KExpVal(y1), KIf(z, CPS(e1)(k), CPS(e2)(k))))
+            CPS(b1)(y1 => 
+                CPS(b2)(y2 => 
+                    KLet(z, Kop(o, y1, y2), KIf(z, CPS(e1)(k), CPS(e2)(k)))))
         }
         case Call(name, args) => {
             def aux(args: Seq[Exp], vs: List[KVal]) : KAnf = args match {

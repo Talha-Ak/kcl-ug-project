@@ -3,6 +3,14 @@ import NewCPS._
 
 object ClosureConv {
 
+    type EnvType = Seq[KVal | FnPointer]
+    case class FnPointer(s: String)
+    case class Env(name: String, vals: EnvType)
+    case class Ref(name: String, idx: Int)
+    
+    case class KLetEnv(x: String, env: Env, next: KAnf) extends KAnf
+    case class KLetEnvRef(x: String, ref: Ref, next: KAnf) extends KAnf
+    
     sealed case class CFunc(fname: String, args: Seq[String], body: KAnf) {
         override def toString = s"fun $fname($args):\n$body\nEND"
     }
@@ -26,55 +34,76 @@ object ClosureConv {
         case KFun(fnName, args, body, in) => free_anf(body) ++ free_anf(in) -- Set(fnName) -- args
     }
 
-    def convert(e: KAnf): KAnf = e match {
+    def convert(e: KAnf, glob_fns: List[String] = Nil): KAnf = e match {
         case KFun(fnName, args, body, in) => {
-            println("Running on " + fnName)
             val env = Fresh("env")
             val fvs = (free_anf(body) -- args).toList
             println(s"The free variables in $fnName are $fvs")
 
             def convertLocalToEnvRef(next: KAnf, i: Int)(ssaVar: String): (KAnf, Int) = {
-                (KLet(ssaVar, KEnvRef(env, i), next), i + 1)
+                (KLetEnvRef(ssaVar, Ref(env, i), next), i + 1)
             }
 
-            val (body2, _) = fvs.zipWithIndex.foldLeft((convert(body), 1)) {
+            val (body2, _) = if fvs.isEmpty
+            then (convert(body, fnName :: glob_fns), 1)
+            else fvs.zipWithIndex.foldLeft((convert(body, glob_fns), 1)) {
                 // LET x = env[i] IN anf
                 case ((anf, i), x) => convertLocalToEnvRef(anf, i)(x._1)
             }
 
-            val vs = fvs.map(KVar)
-            // LET fn = (@fn, fvs...) IN anf
-            val in2 = KLet(fnName, KEnv(KFnPointer(fnName) :: vs), convert(in))
-            KFun(fnName, env +: args, body2, in2)
+            if fvs.isEmpty then (KFun(fnName, args, body2, convert(in, fnName :: glob_fns)))
+            else {
+                val vs = fvs.map(KVar)
+                // LET fn = (@fn, fvs...) IN anf
+                val in2 = KLetEnv(fnName, Env(env, FnPointer(fnName) :: vs), convert(in, glob_fns))
+                (KFun(fnName, env +: args, body2, in2))
+            }
+
         }
         case KLet(x, KCall(fn, vrs), e2) => {
+            println(s"Checking if $fn is in $glob_fns")
             val ptr = Fresh("ptr")
-            KLet(ptr, KEnvRef(fn, 0), KLet(x, KCall(ptr, KVar(fn) +: vrs), convert(e2)))
+            if glob_fns.contains(fn) then KLet(x, KCall(fn, vrs), convert(e2, glob_fns))
+            else KLetEnvRef(ptr, Ref(fn, 0), KLet(x, KCall(ptr, KVar(fn) +: vrs), convert(e2, glob_fns)))
         }
-        case KLet(x, e1, e2) => KLet(x, e1, convert(e2))
-        case KIf(v, e1, e2) => KIf(v, convert(e1), convert(e2))
+        case KLet(x, e1, e2) => KLet(x, e1, convert(e2, glob_fns))
+        case KIf(v, e1, e2) => KIf(v, convert(e1), convert(e2, glob_fns))
         case _ => e
     }
 
-    def hoist(e: KAnf): (List[CFunc], KAnf) = e match {
-        case KFun(fnName, args, body, in) => {
-            val (fns, e) = hoist(body)
-            val (fns2, e2) = hoist(in)
+    def hoist(e: KAnf): (List[CFunc], KAnf, List[Env]) = e match {
+        case KFun(fnName, args, body, next) => {
+            val (fns, e, envs) = hoist(body)
+            val (fns2, e2, envs2) = hoist(next)
             val entry = Fresh("entry")
             val fn = CFunc(fnName, args, e)
-            (fn :: fns ::: fns2, e2)
+            (fn :: fns ::: fns2, e2, envs ::: envs2)
         }
         case KIf(x1, e1, e2) => {
-            val (fns, t) = hoist(e1)
-            val (fns2, f) = hoist(e2)
+            val (fns, t, envs) = hoist(e1)
+            val (fns2, f, envs2) = hoist(e2)
             val thn = Fresh("then")
             val els = Fresh("else")
-            (fns ::: fns2, KIf(x1, t, f))
+            (fns ::: fns2, KIf(x1, t, f), envs ::: envs2)
         }
-        case KLet(x, v, in) => {
-            val (fns, e1) = hoist(in)
-            (fns, KLet(x, v, e1))
+        case KLetEnv(x, env: Env, next) => {
+            val (fns, e1, envs) = hoist(next)
+            (fns, KLetEnv(x, env, e1), env :: envs)
         }
-        case _ => (Nil, e)
+        case KLet(x, v, next) => {
+            val (fns, e1, envs) = hoist(next)
+            (fns, KLet(x, v, e1), envs)
+        }
+        case _ => (Nil, e, Nil)
+    }
+
+    def remove_expval(a: KAnf): KAnf = a match {
+        case KLet(x, e1, KLet(y, KExpVal(_), e2)) => KLet(y, e1, remove_expval(e2))
+        case KIf(x, e1, e2) => KIf(x, remove_expval(e1), remove_expval(e2))
+        case KLetEnv(x, env, e2) => KLetEnv(x, env, remove_expval(e2))
+        case KLetEnvRef(x, ref, e2) => KLetEnvRef(x, ref, remove_expval(e2))
+        case KLet(x, v, e2) => KLet(x, v, remove_expval(e2))
+        case KFun(fnName, args, body, in) => KFun(fnName, args, remove_expval(body), remove_expval(in))
+        case KReturn(v) => KReturn(v)
     }
 }

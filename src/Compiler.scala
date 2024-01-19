@@ -20,23 +20,20 @@ object Compiler {
         }
     }
 
-    // @main
-    // def write() = {
-    //     val fname = "test.fun"
-    //     val path = os.pwd / fname
-    //     val file = fname.stripSuffix("." ++ path.ext)
-    //     val externalFile = scala.io.Source
-    //         .fromResource("test2.txt")
-    //         .mkString
-    //     val ast = fastparse.parse(externalFile, All(_))
-    //     ast match {
-    //      case Parsed.Success(value, index) => {
-    //         val code = compile(ast.get.value)
-    //         os.write.over(os.pwd / (file ++ ".ll"), code)
-    //      }
-    //      case Parsed.Failure(label, idx, extra) => println(extra.traced.trace)
-    //     }
-    // }
+    @main
+    def write() = {
+        val externalFile = scala.io.Source
+            .fromResource("test2.txt")
+            .mkString
+        val ast = fastparse.parse(externalFile, All(_))
+        val code = ast match {
+        //  case Parsed.Success(value, index) => {println(ast.get.value); println(compile_new(ast.get.value))}
+         case Parsed.Success(value, index) => {println(ast.get.value); compile_comb(ast.get.value)}
+         case Parsed.Failure(label, idx, extra) => println(extra.traced.trace); ""
+        }
+        val fname = "test.ll"
+        os.write.over(os.pwd / fname, code)
+    }
 
     // @main
     // def exec() = {
@@ -84,14 +81,11 @@ object Compiler {
     def compile_val(v: KVal) : String = v match {
         case KNum(i) => s"$i"
         case KVar(s) => s"%$s"
-        case KFnPointer(s) => s"@${s}"
     }
 
     // compile K expressions
     def compile_exp(a: KExp) : String = a match {
         case KExpVal(v) => compile_val(v)
-        case KEnv(vals) => s"kenv ${vals.map(compile_val).mkString(", ")}"
-        case KEnvRef(env, idx) => s"kenv_ref $env, $idx"
         case KCall(o, vrs) => {
             val vs = vrs.map(compile_val).mkString("i32 ", ", i32 ", "")
             s"call i32 @${o}($vs)"
@@ -133,10 +127,40 @@ define i32 @printInt(i32 %x) {
 //        }
 //    }
 
+    def compile_env(x: String, env: Env) : String = {
+        val Env(name, vals) = env
+        (
+            i"%$x = alloca %${name}_t" ++
+            vals.zipWithIndex.map{
+                case (FnPointer("foo"), i) => 
+                    i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i" ++
+                    i"store i32 (%${name}_t*, i32)* (i32)* @foo, i32 (%${name}_t*, i32)* (i32)** %$x$i"
+                case (FnPointer(fn), i) => 
+                    i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i" ++
+                    i"store i32 (%${name}_t*, i32)* @$fn, i32 (%${name}_t*, i32)** %$x$i"
+                case (v: KVal, i) => 
+                    i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i" ++
+                    i"store i32 ${compile_val(v)}, i32* %$x$i"
+            }.mkString
+        )
+    }
+    
+    def compile_env_ref(x: String, ref: Ref) : String = {
+        val Ref(env, idx) = ref
+
+        i"%$x = env ref %$env idx $idx"
+    }
+
     def compile_anf(a: KAnf) : String = a match {
         case KReturn(v) =>
             i"ret i32 ${compile_val(v)}"
-        case KLet(x: String, e: KExp, a: KAnf) => 
+        case KLetEnv(x, env, a) =>
+            compile_env(x, env) ++ compile_anf(a)
+        // case KLetEnvRef(x, Ref(env, 0), KLet(y, KCall(fn, vrs), a)) =>
+        //     compile_exp(KCall(env, KVar(env) +: vrs)) ++ compile_anf(KLet(x, KVar(fn), KVar(x)))
+        case KLetEnvRef(x, ref, a) =>
+                compile_env_ref(x, ref) ++ compile_anf(a)
+        case KLet(x, e, a) => 
             i"%$x = ${compile_exp(e)}" ++ compile_anf(a)
         case KIf(x, e1, e2) => {
             val if_br = Fresh("if_branch")
@@ -147,41 +171,53 @@ define i32 @printInt(i32 %x) {
             l"\n$else_br" ++ 
             compile_anf(e2)
         }
+        case fun: KFun => throw new Exception(s"KFun '${fun.fnName}' should not be in closed ANF")
     }
 
 
     def compile_cfunc(f: CFunc) : String = {
         val CFunc(name, args, body) = f
-        val arglist = args.mkString("i32 %", ", i32 %", "")
+        // Assuming the first arg is the environment
+        val arglist = if args.isEmpty
+            then ""
+            else s"%${args.head}_t* %${args.head}, " ++ args.tail.mkString("i32 %", ", i32 %", "")
         val body2 = compile_anf(body)
-        m"define i32 @$name ($arglist) {" ++ body2 ++ m"}\n"
+        m"define i32 @$name ($arglist) {" ++ body2 ++ m"}"
     }
     // main compiler functions
     // def compile(prog: List[Exp]) : String = 
     //     prelude ++ (prog.map(compile_defs).mkString)
 
-    def compile_new(prog: List[Exp]) : String = {
-        val cps = prog.map(CPSi)
-        val closure = cps.map(convert)
-        println(closure)
-        println("################")
-        val hoisted = closure.map(hoist)
-        hoisted.map{case ((cf, a)) => cf.map(compile_cfunc).mkString("\n") ++ compile_anf(a)}.mkString
-        hoisted.mkString("\nNEXTELEMENT\n")
-    }
+    // def compile_new(prog: List[Exp]) : String = {
+    //     val cps = prog.map(CPSi)
+    //     val closure = cps.map(convert)
+    //     println(closure)
+    //     println("################")
+    //     val hoisted = closure.map(hoist)
+    //     hoisted.map{case ((cf, a)) => cf.map(compile_cfunc).mkString("\n") ++ compile_anf(a)}.mkString
+    //     hoisted.mkString("\nNEXTELEMENT\n")
+    // }
+
+    given Conversion[List[Env], String] = _.map {
+        case Env(name, vals) => {
+            vals.map{
+                // TODO remove this hack
+                case FnPointer("foo") => s"i32 (i32)* (%${name}_t*, i32)*"
+                case FnPointer(s) => s"i32 (%${name}_t*, i32)*"
+                case _ => "i32"
+            }.mkString(s"%${name}_t = type { ", ", ", " }")
+        }
+    }.mkString("", "\n", "\n\n")
 
     def compile_comb(prog: Exp) : String = {
         val cps = CPSi(prog)
         val closure = convert(cps)
+        val fixedClosure = remove_expval(closure)
         println(closure)
         println("################")
-        val (cfunc, anf) = hoist(closure)
-        val output = (cfunc :+ CFunc("main", Nil, anf)).map(compile_cfunc).mkString("\n")
+        val (cfunc, anf, envs) = hoist(fixedClosure)
+        val output = envs + (cfunc :+ CFunc("main", Nil, anf)).map(compile_cfunc).mkString("\n")
         output
-
-        // val hoisted = hoist(closure)
-        // hoisted.map{case ((cf, a)) => cf.map(compile_cfunc).mkString("\n") ++ compile_anf(a)}.mkString
-        // hoisted.mkString("\nNEXTELEMENT\n")
     }
 }
 
