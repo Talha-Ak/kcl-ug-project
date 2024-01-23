@@ -68,10 +68,10 @@ object NewCPS {
         //     val z = Fresh("tmp")
         //     CPS(e)(y => KLet(z, KWrite(y), k(KVar(z))))
         // }
-        case Const(i, v) =>
+        case Const(i, t, v) =>
             CPS(v)(y => KLet(i, KExpVal(y), k(KVar(i))))
-        case Func(name, args, body) =>
-            KFun(name, args, CPS(body)(KReturn), k(KVar(name)))
+        case Func(name, args, ret, body) =>
+            KFun(name, args.map(_._1).toList, CPS(body)(KReturn), k(KVar(name)))
         case Main(e) => CPS(e)(KReturn)
     }   
 
