@@ -1,4 +1,6 @@
+Types:
+    - Within ClosureConv, new KVars are not given a type.
+    - Generate correct LLVM.
+
 Closures:
-    - Type function returns
-    - Type fn pointers
-    - Just type everything
+    - KLetEnvRef does not have a LLVM generation.

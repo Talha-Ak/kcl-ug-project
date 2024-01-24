@@ -23,7 +23,7 @@ object Compiler {
     @main
     def write() = {
         val externalFile = scala.io.Source
-            .fromResource("test2.txt")
+            .fromResource("test2typed.txt")
             .mkString
         val ast = fastparse.parse(externalFile, All(_))
         val code = ast match {
@@ -80,7 +80,7 @@ object Compiler {
     // compile K values
     def compile_val(v: KVal) : String = v match {
         case KNum(i) => s"$i"
-        case KVar(s) => s"%$s"
+        case KVar(s, _) => s"%$s"
     }
 
     // compile K expressions
@@ -211,9 +211,11 @@ define i32 @printInt(i32 %x) {
 
     def compile_comb(prog: Exp) : String = {
         val cps = CPSi(prog)
+        println(cps)
+        println("################")
         val closure = convert(cps)
         val fixedClosure = remove_expval(closure)
-        println(closure)
+        println(fixedClosure)
         println("################")
         val (cfunc, anf, envs) = hoist(fixedClosure)
         val output = envs + (cfunc :+ CFunc("main", Nil, anf)).map(compile_cfunc).mkString("\n")

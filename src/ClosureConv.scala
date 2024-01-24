@@ -16,7 +16,7 @@ object ClosureConv {
     }
 
     def free_val(v: KVal): Set[String] = v match {
-        case KVar(s) => Set(s)
+        case KVar(s, _) => Set(s)
         case KNum(i) => Set()
     }
 
@@ -53,7 +53,7 @@ object ClosureConv {
 
             if fvs.isEmpty then (KFun(fnName, args, body2, convert(in, fnName :: glob_fns)))
             else {
-                val vs = fvs.map(KVar)
+                val vs = fvs.map(KVar(_))
                 // LET fn = (@fn, fvs...) IN anf
                 val in2 = KLetEnv(fnName, Env(env, FnPointer(fnName) :: vs), convert(in, glob_fns))
                 (KFun(fnName, env +: args, body2, in2))

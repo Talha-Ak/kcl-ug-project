@@ -1,0 +1,64 @@
+def zero(x: Int): Int = 0;
+
+def suc(x: Int): Int = x + 1;
+
+def pred(x: Int): Int =
+  if x == 0 then x else x - 1;
+
+def add(x: Int, y: Int): Int =
+  if x == 0 then y else suc(add(x - 1, y));
+
+def mult(x: Int, y: Int): Int =
+  if x == 0 then 0 else add(y, mult(x - 1, y));
+
+def pow(x: Int, y: Int): Int =
+  if y == 0 then 1 else mult(x, pow(x, y - 1));
+
+def fib(n: Int): Int = if n == 0 then 0 
+             else if n == 1 then 1 
+             else fib(n - 1) + fib(n - 2);
+
+def fact(n: Int): Int =
+  if n == 0 then 1 else n * fact(n - 1);
+
+def ack(m: Int, n: Int): Int = if m == 0 then n + 1
+                else if n == 0 then ack(m - 1, 1)
+                else ack(m - 1, ack(m, n - 1));
+
+def stack_test(x: Int): Int = x + 1 + 2 + 3 + 4 + 5;
+
+def div(x: Int, y: Int): Int = x / y;   //integer division
+
+def rem(x: Int, y: Int): Int = x % y;   //remainder
+
+def gcd(a: Int, b: Int): Int =
+  if b == 0 then a else gcd(b, a % b);
+
+def is_prime_aux(n: Int, i: Int): Int = 
+  if n % i == 0 then 0
+  else if (i * i) <= n then is_prime_aux(n, i + 1)  
+  else 1;
+
+def is_prime(n: Int): Int = if n == 2 then 1 else is_prime_aux(n, 2);
+
+def is_collatz(n: Int): Int =
+  if n == 1 then 1
+  else if n % 2 == 0 then is_collatz(n / 2)
+  else is_collatz(3 * n + 1);  
+
+def facT(n: Int, acc: Int): Int =
+  if n == 0 then acc else facT(n - 1, n * acc);
+
+
+def main() = {
+//zero(3)
+//suc(8)
+//pred(7)
+mult(4,5)
+//pow(2, 3)
+//fib(20)
+//stack_test(0)
+//gcd(54, 24)
+//is_prime(2)
+//facT(6, 1)
+}
