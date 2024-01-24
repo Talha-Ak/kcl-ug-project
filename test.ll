@@ -1,16 +1,16 @@
-%env_5_t = type { i32 (%env_5_t*, i32)*, i32 }
+%env_6_t = type { i32 (%env_6_t*, i32)*, i32 }
 
 define i32 @foo (%x_t* %x, i32 %) {
-   %bar = alloca %env_5_t
-   %bar0 = getelementptr %env_5_t, %env_5_t* %bar, i32 0, i32 0
-   store i32 (%env_5_t*, i32)* @bar, i32 (%env_5_t*, i32)** %bar0
-   %bar1 = getelementptr %env_5_t, %env_5_t* %bar, i32 0, i32 1
+   %bar = alloca %env_6_t
+   %bar0 = getelementptr %env_6_t, %env_6_t* %bar, i32 0, i32 0
+   store i32 (%env_6_t*, i32)* @bar, i32 (%env_6_t*, i32)** %bar0
+   %bar1 = getelementptr %env_6_t, %env_6_t* %bar, i32 0, i32 1
    store i32 %x, i32* %bar1
    ret i32 %bar
 }
 
-define i32 @bar (%env_5_t* %env_5, i32 %y) {
-   %x = env ref %env_5 idx 1
+define i32 @bar (%env_6_t* %env_6, i32 %y) {
+   %x = env ref %env_6 idx 1
    %tmp_0 = add i32 %x, %y
    ret i32 %tmp_0
 }
@@ -20,9 +20,14 @@ define i32 @simple (%a_t* %a, i32 %) {
    ret i32 %tmp_1
 }
 
+define i32 @rec (%x_t* %x, i32 %) {
+   %tmp_2 = call i32 @rec(i32 1)
+   ret i32 %tmp_2
+}
+
 define i32 @main () {
    %add = call i32 @foo(i32 3)
-   %ptr_8 = env ref %add idx 0
-   %tmp_3 = call i32 @ptr_8(i32 %add, i32 4)
-   ret i32 %tmp_3
+   %ptr_11 = env ref %add idx 0
+   %tmp_4 = call i32 @ptr_11(i32 %add, i32 4)
+   ret i32 %tmp_4
 }

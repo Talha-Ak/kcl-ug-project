@@ -5,6 +5,8 @@ def foo(x: Int): (Int) => Int = {
 
 def simple(a: Int): Int = a * 2;
 
+def rec(x: Int): Int = rec(1);
+
 def main() = {
   val add: (Int) => Int = foo(3);
   add(4)

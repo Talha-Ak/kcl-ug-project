@@ -1,70 +1,74 @@
 package compiler
 import NewCPS._
+import ValParser.Type
+import compiler.ValParser.PrimType
+import compiler.ValParser.FnType
+import compiler.ValParser.Missing
 
 object ClosureConv {
 
-    type EnvType = Seq[KVal | FnPointer]
-    case class FnPointer(s: String)
+    type EnvType = Seq[KVal]
     case class Env(name: String, vals: EnvType)
     case class Ref(name: String, idx: Int)
+
+    case class KLetEnv(x: String, env: Env, next: KAnf) extends KAnf {
+        override def toString = s"LET $x = $env \n$next"
+    }
+    case class KLetEnvRef(x: String, ref: Ref, next: KAnf) extends KAnf {
+        override def toString = s"LET $x = $ref \n$next"
+    }
     
-    case class KLetEnv(x: String, env: Env, next: KAnf) extends KAnf
-    case class KLetEnvRef(x: String, ref: Ref, next: KAnf) extends KAnf
-    
-    sealed case class CFunc(fname: String, args: Seq[String], body: KAnf) {
+    sealed case class CFunc(fname: String, args: Seq[(String, Type)], body: KAnf) {
         override def toString = s"fun $fname($args):\n$body\nEND"
     }
 
-    def free_val(v: KVal): Set[String] = v match {
-        case KVar(s, _) => Set(s)
-        case KNum(i) => Set()
+    def free_val(v: KVal): Set[KVar] = v match {
+        case k: KVar => Set(k)
+        case _ => Set()
     }
 
-    def free_exp(e: KExp): Set[String] = e match {
+    def free_exp(e: KExp): Set[KVar] = e match {
         case Kop(o, v1, v2) => free_val(v1) ++ free_val(v2)
         case KCall(o, vrs) => vrs.flatMap(free_val).toSet
         case KExpVal(v) => free_val(v)
     }
 
 
-    def free_anf(e: KAnf): Set[String] = e match {
-        case KLet(x, e1, e2) => free_exp(e1) ++ free_anf(e2) - x
+    def free_anf(e: KAnf): Set[KVar] = e match {
+        case KLet(x, e1, e2) => (free_exp(e1) ++ free_anf(e2)).filterNot(_.s == x)
         case KIf(x, e1, e2) => free_anf(e1) ++ free_anf(e2)
         case KReturn(v) => free_val(v)
-        case KFun(fnName, args, body, in) => free_anf(body) ++ free_anf(in) -- Set(fnName) -- args
+        case KFun(fnName, args, body, in) => (free_anf(body) ++ free_anf(in)).filterNot(x => args.map(_._1).contains(x.s) || x.s == fnName)
     }
 
     def convert(e: KAnf, glob_fns: List[String] = Nil): KAnf = e match {
         case KFun(fnName, args, body, in) => {
-            val env = Fresh("env")
-            val fvs = (free_anf(body) -- args).toList
+            val envId = Fresh("env")
+            val fvs = free_anf(body).filterNot(x => args.map(_._1).contains(x.s)).toList
             println(s"The free variables in $fnName are $fvs")
 
-            def convertLocalToEnvRef(next: KAnf, i: Int)(ssaVar: String): (KAnf, Int) = {
-                (KLetEnvRef(ssaVar, Ref(env, i), next), i + 1)
+            if fvs.isEmpty then {
+                KFun(fnName, args, convert(body, fnName :: glob_fns), convert(in, fnName :: glob_fns))
             }
-
-            val (body2, _) = if fvs.isEmpty
-            then (convert(body, fnName :: glob_fns), 1)
-            else fvs.zipWithIndex.foldLeft((convert(body, glob_fns), 1)) {
-                // LET x = env[i] IN anf
-                case ((anf, i), x) => convertLocalToEnvRef(anf, i)(x._1)
-            }
-
-            if fvs.isEmpty then (KFun(fnName, args, body2, convert(in, fnName :: glob_fns)))
             else {
-                val vs = fvs.map(KVar(_))
-                // LET fn = (@fn, fvs...) IN anf
-                val in2 = KLetEnv(fnName, Env(env, FnPointer(fnName) :: vs), convert(in, glob_fns))
-                (KFun(fnName, env +: args, body2, in2))
-            }
+                val env = Env(envId, KVar(fnName, Missing) :: fvs)
 
+                val (body2, _) = fvs.zipWithIndex.foldLeft((convert(body, glob_fns), 1)) {
+                    // LET x = env[i] IN anf
+                    case ((next, i), (ssaVar, _)) => (KLetEnvRef(ssaVar.s, Ref(envId, i), next), i + 1)
+                }
+
+                // LET fn = (@fn, fvs...) IN anf
+                val in2 = KLetEnv(fnName, env, convert(in, glob_fns))
+                KFun(fnName, (envId, Missing) +: args, body2, in2)
+            }
         }
         case KLet(x, KCall(fn, vrs), e2) => {
-            println(s"Checking if $fn is in $glob_fns")
             val ptr = Fresh("ptr")
-            if glob_fns.contains(fn) then KLet(x, KCall(fn, vrs), convert(e2, glob_fns))
-            else KLetEnvRef(ptr, Ref(fn, 0), KLet(x, KCall(ptr, KVar(fn) +: vrs), convert(e2, glob_fns)))
+            if glob_fns.contains(fn) then
+                KLet(x, KCall(fn, vrs), convert(e2, glob_fns))
+            else
+                KLetEnvRef(ptr, Ref(fn, 0), KLet(x, KCall(ptr, KVar(fn) +: vrs), convert(e2, glob_fns)))
         }
         case KLet(x, e1, e2) => KLet(x, e1, convert(e2, glob_fns))
         case KIf(v, e1, e2) => KIf(v, convert(e1), convert(e2, glob_fns))

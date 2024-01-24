@@ -132,10 +132,10 @@ define i32 @printInt(i32 %x) {
         (
             i"%$x = alloca %${name}_t" ++
             vals.zipWithIndex.map{
-                case (FnPointer("foo"), i) => 
+                case (KVar("foo", Missing), i) => 
                     i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i" ++
                     i"store i32 (%${name}_t*, i32)* (i32)* @foo, i32 (%${name}_t*, i32)* (i32)** %$x$i"
-                case (FnPointer(fn), i) => 
+                case (KVar(fn, Missing), i) => 
                     i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i" ++
                     i"store i32 (%${name}_t*, i32)* @$fn, i32 (%${name}_t*, i32)** %$x$i"
                 case (v: KVal, i) => 
@@ -176,7 +176,8 @@ define i32 @printInt(i32 %x) {
 
 
     def compile_cfunc(f: CFunc) : String = {
-        val CFunc(name, args, body) = f
+        val CFunc(name, argtypes, body) = f
+        val args = argtypes.map(_._1)
         // Assuming the first arg is the environment
         val arglist = if args.isEmpty
             then ""
@@ -202,8 +203,8 @@ define i32 @printInt(i32 %x) {
         case Env(name, vals) => {
             vals.map{
                 // TODO remove this hack
-                case FnPointer("foo") => s"i32 (i32)* (%${name}_t*, i32)*"
-                case FnPointer(s) => s"i32 (%${name}_t*, i32)*"
+                case KVar("foo", Missing) => s"i32 (i32)* (%${name}_t*, i32)*"
+                case KVar(s, Missing) => s"i32 (%${name}_t*, i32)*"
                 case _ => "i32"
             }.mkString(s"%${name}_t = type { ", ", ", " }")
         }

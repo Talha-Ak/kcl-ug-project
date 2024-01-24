@@ -35,8 +35,8 @@ object NewCPS {
     case class KIf(v: String, e1: KAnf, e2: KAnf) extends KAnf:
         override def toString = s"IF $v \nTHEN \n${pad(e1)} \nELSE \n${pad(e2)}"
 
-    case class KFun(fnName: String, args: Seq[String], body: KAnf, in: KAnf) extends KAnf:
-        override def toString = s"FUN $fnName($args): \n${pad(body)} \nENDFUN \n$in"
+    case class KFun(fnName: String, args: Seq[(String, Type)], body: KAnf, in: KAnf) extends KAnf:
+        override def toString = s"FUN $fnName($args) = { \n${pad(body)} \n} \n\n$in"
 
     case class KReturn(v: KVal) extends KAnf:
         override def toString = s"RETURN $v"
@@ -63,7 +63,7 @@ object NewCPS {
             def aux(args: Seq[Exp], vs: List[KVal], ty: TypeEnv) : KAnf = args match {
                 case Nil => {
                     val z = Fresh("tmp")
-                    val retTy = ty(name). match {
+                    val retTy = ty(name) match {
                         case FnType(_, t) => t
                         case _ => throw new Exception(s"Expected function type for $name")
                     }
@@ -85,7 +85,7 @@ object NewCPS {
         case Func(name, args, ret, body) =>
             println("Calling func for " ++ name)
             val updated_ty = ty ++ args.map{case (x, t) => (x, t)} + (name -> FnType(args.map(_._2).toList, ret))
-            KFun(name, args.map(_._1).toList, CPS(body, updated_ty)((y, _) => KReturn(y)), k(KVar(name), ty + (name -> FnType(args.map(_._2).toList, ret))))
+            KFun(name, args, CPS(body, updated_ty)((y, _) => KReturn(y)), k(KVar(name), ty + (name -> FnType(args.map(_._2).toList, ret))))
         case Main(e) => CPS(e, ty)((y, _) => KReturn(y))
     }   
 
