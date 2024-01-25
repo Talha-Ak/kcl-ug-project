@@ -1,11 +1,12 @@
 package compiler
 import fastparse._, ScalaWhitespace._
+import compiler.ClosureConv.Env
 
 object ValParser {
 
     sealed trait Exp
     sealed trait BExp
-    sealed trait Type
+    trait Type
 
     case class Func(name: String, args: Seq[(String, Type)], ret: Type, body: Exp) extends Exp
     case class Const(i: String, t: Type, v: Exp) extends Exp

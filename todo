@@ -1,6 +1,2 @@
-Types:
-    - Within ClosureConv, new KVars are not given a type.
-    - Generate correct LLVM.
-
-Closures:
-    - KLetEnvRef does not have a LLVM generation.
+- When closureconv, the variable for nested fn is shadowed by an environment variable.
+    This updated type needs to be propagated.

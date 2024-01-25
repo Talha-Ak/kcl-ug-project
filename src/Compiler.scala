@@ -55,6 +55,15 @@ object Compiler {
     //     }
     // }
 
+    extension (t: Type)
+        def llvm = t match {
+            case PrimType("Int") => "i32"
+            case PrimType("Bool") => "i1"
+            case PrimType("Unit") => "void"
+            case EnvType(env) => s"%${env}_t"
+            case t => "???"
+        }
+
     extension (sc: StringContext) {
         def i(args: Any*): String = "   " ++ sc.s(args:_*) ++ "\n"
         def l(args: Any*): String = sc.s(args:_*) ++ ":\n"
@@ -176,14 +185,13 @@ define i32 @printInt(i32 %x) {
 
 
     def compile_cfunc(f: CFunc) : String = {
-        val CFunc(name, argtypes, body) = f
-        val args = argtypes.map(_._1)
+        val CFunc(name, args, ret, body) = f
         // Assuming the first arg is the environment
         val arglist = if args.isEmpty
             then ""
-            else s"%${args.head}_t* %${args.head}, " ++ args.tail.mkString("i32 %", ", i32 %", "")
+            else args.map{case ((s, t)) => s"${t.llvm} %$s"}.mkString(", ")
         val body2 = compile_anf(body)
-        m"define i32 @$name ($arglist) {" ++ body2 ++ m"}"
+        m"define ${ret.llvm} @$name ($arglist) {" ++ body2 ++ m"}"
     }
     // main compiler functions
     // def compile(prog: List[Exp]) : String = 
@@ -214,12 +222,12 @@ define i32 @printInt(i32 %x) {
         val cps = CPSi(prog)
         println(cps)
         println("################")
-        val closure = convert(cps)
+        val (closure, _) = convert(cps)
         val fixedClosure = remove_expval(closure)
         println(fixedClosure)
         println("################")
         val (cfunc, anf, envs) = hoist(fixedClosure)
-        val output = envs + (cfunc :+ CFunc("main", Nil, anf)).map(compile_cfunc).mkString("\n")
+        val output = envs + (cfunc :+ CFunc("main", Nil, PrimType("Int"), anf)).map(compile_cfunc).mkString("\n")
         output
     }
 }

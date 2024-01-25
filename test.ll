@@ -1,6 +1,6 @@
 %env_6_t = type { i32 (%env_6_t*, i32)*, i32 }
 
-define i32 @foo (%x_t* %x, i32 %) {
+define %env_6_t @foo (i32 %x) {
    %bar = alloca %env_6_t
    %bar0 = getelementptr %env_6_t, %env_6_t* %bar, i32 0, i32 0
    store i32 (%env_6_t*, i32)* @bar, i32 (%env_6_t*, i32)** %bar0
@@ -9,18 +9,18 @@ define i32 @foo (%x_t* %x, i32 %) {
    ret i32 %bar
 }
 
-define i32 @bar (%env_6_t* %env_6, i32 %y) {
+define i32 @bar (%env_6_t %env_6, i32 %y) {
    %x = env ref %env_6 idx 1
    %tmp_0 = add i32 %x, %y
    ret i32 %tmp_0
 }
 
-define i32 @simple (%a_t* %a, i32 %) {
+define i32 @simple (i32 %a) {
    %tmp_1 = mul i32 %a, 2
    ret i32 %tmp_1
 }
 
-define i32 @rec (%x_t* %x, i32 %) {
+define i32 @rec (i32 %x) {
    %tmp_2 = call i32 @rec(i32 1)
    ret i32 %tmp_2
 }
