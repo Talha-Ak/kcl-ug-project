@@ -1,2 +1,4 @@
-- When closureconv, the variable for nested fn is shadowed by an environment variable.
-    This updated type needs to be propagated.
+- Test out types/closures and check for errors
+- Add printf
+- Add more tests
+- Time for enums

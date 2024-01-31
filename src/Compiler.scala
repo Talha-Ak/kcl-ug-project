@@ -55,12 +55,29 @@ object Compiler {
     //     }
     // }
 
+    val prelude = """
+@.str = private constant [4 x i8] c"%d\0A\00"
+
+declare i32 @printf(i8*, ...)
+
+define i32 @printInt(i32 %x) {
+    %t0 = getelementptr [4 x i8], [4 x i8]* @.str, i32 0, i32 0
+    call i32 (i8*, ...) @printf(i8* %t0, i32 %x) 
+    ret i32 %x
+}
+
+"""
+
+    // Another crime committed
+    var program_envs: List[Env] = Nil
+
     extension (t: Type)
-        def llvm = t match {
+        def llvm: String = t match {
             case PrimType("Int") => "i32"
             case PrimType("Bool") => "i1"
             case PrimType("Unit") => "void"
-            case EnvType(env) => s"%${env}_t"
+            case EnvType(env) => s"%${env}_t*"
+            case FnType(args, ret) => ret.llvm ++ " " ++ args.map(_.llvm).mkString("(", ", ", ")*")
             case t => "???"
         }
 
@@ -70,6 +87,16 @@ object Compiler {
         def m(args: Any*): String = sc.s(args:_*) ++ "\n"
         def c(args: Any*): String = "@" ++ sc.s(args:_*) ++ "\n"
     }
+
+    given Conversion[List[Env], String] = _.map {
+        case Env(name, vals) => {
+            vals.map{
+                // TODO remove this hack
+                case KVar(_, t) => t.llvm
+                case KNum(_) => PrimType("Int").llvm
+            }.mkString(s"%${name}_t = type { ", ", ", " }")
+        }
+    }.mkString("", "\n", "\n\n")
 
     // mathematical and boolean operations
     def compile_op(op: String) = op match {
@@ -96,79 +123,53 @@ object Compiler {
     def compile_exp(a: KExp) : String = a match {
         case KExpVal(v) => compile_val(v)
         case KCall(o, vrs) => {
-            val vs = vrs.map(compile_val).mkString("i32 ", ", i32 ", "")
-            s"call i32 @${o}($vs)"
+            val vs = vrs.map{
+                case KVar(s, t) => s"${t.llvm} %$s"
+                case KNum(i) => s"i32 $i"
+            }.mkString(", ")
+            // If the first arg is an environment, we can assume this is a call to a pointer
+            if vrs(0).get_type.isInstanceOf[EnvType]
+                then s"call ${o.t.llvm} %${o.s}($vs)"
+                else s"call ${o.t.llvm} @${o.s}($vs)"
         }
         case Kop(op, x1, x2) => 
             s"${compile_op(op)} ${compile_val(x1)}, ${compile_val(x2)}"
     }
 
-
-
-    val prelude = """
-@.str = private constant [4 x i8] c"%d\0A\00"
-
-declare i32 @printf(i8*, ...)
-
-define i32 @printInt(i32 %x) {
-    %t0 = getelementptr [4 x i8], [4 x i8]* @.str, i32 0, i32 0
-    call i32 (i8*, ...) @printf(i8* %t0, i32 %x) 
-    ret i32 %x
-}
-
-"""
-
-
-    // compile function for declarations and main
-//    def compile_defs(d: Exp) : String = d match {
-//        case Func(name, args, body) => { println(CPSi(body));
-//            m"define i32 @$name (${args.mkString("i32 %", ", i32 %", "")}) {" ++
-//            compile_exp(CPSi(body)) ++
-//            m"}\n"
-//        }
-//        case Const(i, n: Num) => {
-//            c"$i = global i32 ${n.i}"
-//        }
-//        case Main(body) => { println(CPSi(body));
-//            m"define i32 @main() {" ++
-//            compile_exp(CPS(body)(_ => KReturn(KNum(0)))) ++
-//            m"}\n"
-//        }
-//    }
-
     def compile_env(x: String, env: Env) : String = {
         val Env(name, vals) = env
-        (
-            i"%$x = alloca %${name}_t" ++
-            vals.zipWithIndex.map{
-                case (KVar("foo", Missing), i) => 
-                    i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i" ++
-                    i"store i32 (%${name}_t*, i32)* (i32)* @foo, i32 (%${name}_t*, i32)* (i32)** %$x$i"
-                case (KVar(fn, Missing), i) => 
-                    i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i" ++
-                    i"store i32 (%${name}_t*, i32)* @$fn, i32 (%${name}_t*, i32)** %$x$i"
-                case (v: KVal, i) => 
-                    i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i" ++
-                    i"store i32 ${compile_val(v)}, i32* %$x$i"
-            }.mkString
-        )
+        i"%$x = alloca %${name}_t" ++
+        vals.zipWithIndex.map{ case (v, i) =>
+            val get_elem_ptr = i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i"
+            val store = v match {
+                case KVar(s, t: FnType) => i"store ${t.llvm} @$s, ${t.llvm}* %$x$i"
+                case KVar(_, t) => i"store ${t.llvm} ${compile_val(v)}, ${t.llvm}* %$x$i"
+                case KNum(n) => i"store i32 $n, i32* %$x$i"
+            }
+            get_elem_ptr ++ store
+        }.mkString
     }
     
     def compile_env_ref(x: String, ref: Ref) : String = {
-        val Ref(env, idx) = ref
-
-        i"%$x = env ref %$env idx $idx"
+        val actual_name = ref.env match {
+            case KVar(_, t: EnvType) => t.env
+            case _ => throw new Exception(s"Expected environment type, got ${ref.env}")
+        }
+        val env = program_envs.find(_.name == actual_name).get
+        val ptr = Fresh("ptr")
+        i"%$ptr = getelementptr %${env.name}_t, %${env.name}_t* %${ref.env.s}, i32 0, i32 ${ref.idx}" ++
+        i"%$x = load ${env.vals(ref.idx).get_type.llvm}, ${env.vals(ref.idx).get_type.llvm}* %$ptr"
     }
 
     def compile_anf(a: KAnf) : String = a match {
+        case KReturn(KVar(s, t)) => 
+            i"ret ${t.llvm} %$s"
         case KReturn(v) =>
             i"ret i32 ${compile_val(v)}"
         case KLetEnv(x, env, a) =>
             compile_env(x, env) ++ compile_anf(a)
-        // case KLetEnvRef(x, Ref(env, 0), KLet(y, KCall(fn, vrs), a)) =>
-        //     compile_exp(KCall(env, KVar(env) +: vrs)) ++ compile_anf(KLet(x, KVar(fn), KVar(x)))
         case KLetEnvRef(x, ref, a) =>
-                compile_env_ref(x, ref) ++ compile_anf(a)
+            compile_env_ref(x, ref) ++ compile_anf(a)
         case KLet(x, e, a) => 
             i"%$x = ${compile_exp(e)}" ++ compile_anf(a)
         case KIf(x, e1, e2) => {
@@ -183,7 +184,6 @@ define i32 @printInt(i32 %x) {
         case fun: KFun => throw new Exception(s"KFun '${fun.fnName}' should not be in closed ANF")
     }
 
-
     def compile_cfunc(f: CFunc) : String = {
         val CFunc(name, args, ret, body) = f
         // Assuming the first arg is the environment
@@ -193,41 +193,18 @@ define i32 @printInt(i32 %x) {
         val body2 = compile_anf(body)
         m"define ${ret.llvm} @$name ($arglist) {" ++ body2 ++ m"}"
     }
-    // main compiler functions
-    // def compile(prog: List[Exp]) : String = 
-    //     prelude ++ (prog.map(compile_defs).mkString)
-
-    // def compile_new(prog: List[Exp]) : String = {
-    //     val cps = prog.map(CPSi)
-    //     val closure = cps.map(convert)
-    //     println(closure)
-    //     println("################")
-    //     val hoisted = closure.map(hoist)
-    //     hoisted.map{case ((cf, a)) => cf.map(compile_cfunc).mkString("\n") ++ compile_anf(a)}.mkString
-    //     hoisted.mkString("\nNEXTELEMENT\n")
-    // }
-
-    given Conversion[List[Env], String] = _.map {
-        case Env(name, vals) => {
-            vals.map{
-                // TODO remove this hack
-                case KVar("foo", Missing) => s"i32 (i32)* (%${name}_t*, i32)*"
-                case KVar(s, Missing) => s"i32 (%${name}_t*, i32)*"
-                case _ => "i32"
-            }.mkString(s"%${name}_t = type { ", ", ", " }")
-        }
-    }.mkString("", "\n", "\n\n")
 
     def compile_comb(prog: Exp) : String = {
-        val cps = CPSi(prog)
+        val cps = remove_expval(CPSi(prog))
         println(cps)
         println("################")
         val (closure, _) = convert(cps)
-        val fixedClosure = remove_expval(closure)
-        println(fixedClosure)
+        println(closure)
         println("################")
-        val (cfunc, anf, envs) = hoist(fixedClosure)
-        val output = envs + (cfunc :+ CFunc("main", Nil, PrimType("Int"), anf)).map(compile_cfunc).mkString("\n")
+        val (cfunc, anf, envs) = hoist(closure)
+        program_envs = envs
+        val full_program = cfunc :+ CFunc("main", Nil, PrimType("Int"), anf)
+        val output = envs + full_program.map(compile_cfunc).mkString("\n")
         output
     }
 }

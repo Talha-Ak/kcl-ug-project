@@ -23,7 +23,7 @@ object NewCPS {
 
     sealed trait KExp
     case class Kop(o: String, v1: KVal, v2: KVal) extends KExp
-    case class KCall(o: String, vrs: Seq[KVal]) extends KExp
+    case class KCall(v: KVar, vrs: Seq[KVal]) extends KExp
     case class KExpVal(v: KVal) extends KExp
 
     trait KAnf:
@@ -67,7 +67,8 @@ object NewCPS {
                         case FnType(_, t) => t
                         case _ => throw new Exception(s"Expected function type for $name")
                     }
-                    KLet(z, KCall(name, vs), k(KVar(z, retTy), ty))
+                    val fn_call = KVar(name, retTy)
+                    KLet(z, KCall(fn_call, vs), k(KVar(z, retTy), ty))
                 }
                 case e::es => CPS(e, ty)((y, t1) => aux(es, vs ::: List(y), t1))
             }

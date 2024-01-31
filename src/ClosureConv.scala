@@ -7,7 +7,7 @@ import compiler.ValParser.Missing
 object ClosureConv {
 
     case class Env(name: String, vals: Seq[KVal])
-    case class Ref(name: String, idx: Int)
+    case class Ref(env: KVar, idx: Int)
     case class EnvType(env: String) extends Type
 
     case class KLetEnv(x: String, env: Env, next: KAnf) extends KAnf {
@@ -44,42 +44,53 @@ object ClosureConv {
 
     def convert(e: KAnf): (KAnf, Option[Env]) = e match {
         case KFun(fnName, args, ret, body, in) => {
-            val envId = Fresh("env")
             val fvs = free_anf(body).filterNot(x => args.map(_._1).contains(x.s)).toList
             println(s"The free variables in $fnName are $fvs")
-
+            
             if fvs.isEmpty then {
                 glob_fns += fnName
                 val (body2, env) = convert(body)
                 val (in2, _) = convert(in)
                 env match
                     case None => (KFun(fnName, args, ret, body2, in2), None)
-                    case Some(e) => (KFun(fnName, args, EnvType(e.name), body2, in2), None)
-            }
-            else {
-                val env = Env(envId, KVar(fnName, Missing) :: fvs)
+                    case Some(e) =>
+                        val updated_body = update_types(body2, Map(fnName -> EnvType(e.name)))
+                        val updated_in = update_types(in2, Map(fnName -> EnvType(e.name)))
+                        (KFun(fnName, args, EnvType(e.name), updated_body, updated_in), None)
+                }
+                else {
+                val (converted_body, next_env) = convert(body)
 
-                val ((body2, next_env), _) = fvs.zipWithIndex.foldLeft((convert(body), 1)) { // missing nested envs
+                val envId = Fresh("env")
+                val newArgs = (envId, EnvType(envId)) +: args
+                val newRet = if next_env.isEmpty then ret else EnvType(next_env.get.name)
+                val env = Env(envId, KVar(fnName, FnType(newArgs.map(_._2), newRet)) :: fvs)
+                println(s"The env for " + fnName + " is " + env)
+                
+                // For each free variable, add a line that extracts it from the environment
+                val (body2, _) = fvs.zipWithIndex.foldLeft(converted_body, 1) { // missing nested envs
                     // LET x = env[i] IN anf
-                    case ((next, i), (ssaVar, _)) => ((KLetEnvRef(ssaVar.s, Ref(envId, i), next._1), next._2), i + 1)
+                    case ((next, i), (ssaVar, _)) => (KLetEnvRef(ssaVar.s, Ref(KVar(envId, EnvType(envId)), i), next), i + 1)
                 }
 
-                // LET fn = (@fn, fvs...) IN anf
                 val (in2, _) = convert(in)
+                // LET fn = (@fn, fvs...) IN anf
                 val let_env = KLetEnv(fnName, env, in2)
-                next_env match
-                    case None => (KFun(fnName, (envId, EnvType(envId)) +: args, ret, body2, let_env), Some(env))
-                    case Some(e) => (KFun(fnName, (envId, EnvType(envId)) +: args, EnvType(e.name), body2, let_env), Some(env))
+
+
+                val updated_body = update_types(body2, Map(fnName -> newRet))
+                val updated_in = update_types(let_env, Map(fnName -> newRet))
+                (KFun(fnName, newArgs, newRet, updated_body, updated_in), Some(env))
             }
         }
         case KLet(x, KCall(fn, vrs), e2) => {
             val ptr = Fresh("ptr")
-            if glob_fns.contains(fn) then
+            if glob_fns.contains(fn.s) then
                 val (in, env) = convert(e2)
                 (KLet(x, KCall(fn, vrs), in), env)
             else
                 val (in, env) = convert(e2)
-                (KLetEnvRef(ptr, Ref(fn, 0), KLet(x, KCall(ptr, KVar(fn) +: vrs), in)), env)
+                (KLetEnvRef(ptr, Ref(fn, 0), KLet(x, KCall(KVar(ptr, fn.t), fn +: vrs), in)), env)
         }
         case KLet(x, e1, e2) =>
             val (in, env) = convert(e2)
@@ -126,4 +137,41 @@ object ClosureConv {
         case KFun(fnName, args, ret, body, in) => KFun(fnName, args, ret, remove_expval(body), remove_expval(in))
         case KReturn(v) => KReturn(v)
     }
+
+    def update_types(a: KAnf, ty: Map[String, Type]): KAnf = a match {
+        case KLet(x, e1, e2) => e1 match {
+            case Kop(o, v1, v2) =>
+                val (uv1, v1_ty) = update_val_types(v1, ty)
+                KLet(x, Kop(o, uv1, v2), update_types(e2, ty + (x -> v1.get_type)))
+            case KCall(o, vrs) => 
+                val call_ty = ty.getOrElse(o.s, o.t)
+                vrs.foldLeft((Seq[KVal](), ty)) { case ((vs, t), v) =>
+                    val (uv, t2) = update_val_types(v, t)
+                    (vs :+ uv, t2)
+                } match { case (vrs, ty) => KLet(x, KCall(KVar(o.s, call_ty), vrs), update_types(e2, ty + (x -> call_ty))) }
+            case KExpVal(v) => throw new Exception("KExpVals should be removed by now")
+        }
+        case KFun(fnName, args, ret, body, in) =>
+            val fn_ty = ty.getOrElse(fnName, ret)
+            val body_ty = ty ++ args + (fnName -> fn_ty)
+            val body2 = update_types(body, body_ty)
+            val in_ty = ty + (fnName -> fn_ty)
+            val in2 = update_types(in, in_ty)
+            KFun(fnName, args, ret, body2, in2)
+        case KIf(x, e1, e2) => KIf(x, update_types(e1, ty), update_types(e2, ty))
+        case KLetEnv(x, env, e2) => KLetEnv(x, env, update_types(e2, ty + (x -> EnvType(env.name))))
+        case KLetEnvRef(x, Ref(env, idx), e2) =>
+        // Type overriden by what environment says it is
+            KLetEnvRef(x, Ref(KVar(env.s, ty.getOrElse(env.s, EnvType(env.s))), idx), update_types(e2, ty))
+        case KReturn(v) => KReturn(update_val_types(v, ty)._1)
+    }
+
+    def update_val_types(a: KVal, ty: Map[String, Type]): (KVal, Map[String, Type]) = a match {
+        case KVar(s, t) =>
+            val t2 = ty.getOrElse(s, t)
+            (KVar(s, t2), ty + (s -> t2))
+        case KNum(i) => (KNum(i), ty)
+    }
+
 }
+
