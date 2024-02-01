@@ -1,13 +1,15 @@
 package compiler
 import fastparse._, ScalaWhitespace._
+import compiler.ClosureConv.Env
 
 object ValParser {
 
     sealed trait Exp
     sealed trait BExp
+    trait Type
 
-    case class Func(name: String, args: Seq[String], body: Exp) extends Exp
-    case class Const(i: String, v: Exp) extends Exp
+    case class Func(name: String, args: Seq[(String, Type)], ret: Type, body: Exp) extends Exp
+    case class Const(i: String, t: Type, v: Exp) extends Exp
     case class Main(e: Exp) extends Exp
 
     case class Call(name: String, args: Seq[Exp]) extends Exp
@@ -20,12 +22,23 @@ object ValParser {
         override def toString = s"Sequence(\n$e1, $e2\n)"
     }
 
+    case object Missing extends Type
+    case class PrimType(name: String) extends Type
+    case class FnType(args: Seq[Type], ret: Type) extends Type
+
     // // Identifiers
     // //===============
     def NumParser[$: P] =
         P(CharsWhileIn("0-9", 1)).!.map(_.toInt)
+
     def IdParser[$: P] =
         P(!StringIn("if", "then", "else", "write", "def") ~ CharIn("A-Za-z") ~~ CharsWhileIn("A-Za-z0-9_", 0)).!
+
+    def TypeParser[$: P]: P[Type] =
+        P("(" ~ TypeParser.rep(0, ",") ~ ")" ~ "=>" ~ TypeParser).map(FnType) |
+        IdParser.map(PrimType) // TODO: Make bespoke parser for types
+    
+    def TypedIdParser[$: P] = P(IdParser ~ ":" ~ TypeParser)
 
     // Expressions
     //===============
@@ -55,8 +68,10 @@ object ValParser {
         NumParser.map(Num)
     )
 
-    def DefFn[$: P]: P[Exp] = P("def" ~ IdParser ~ "(" ~ IdParser.rep(0, ",") ~ ")" ~ "=" ~/ Exp ~ ";").map(Func).log
-    def DefVal[$: P]: P[Exp] = P("val" ~ IdParser ~ "=" ~/ Exp ~ ";").map(Const).log
+    def DefFn[$: P]: P[Exp] =
+        P("def" ~ IdParser ~ "(" ~ TypedIdParser.rep(0, ",") ~ ")" ~ ":" ~ TypeParser ~ "=" ~/ Exp ~ ";").map(Func).log
+    def DefVal[$: P]: P[Exp] =
+        P("val" ~ TypedIdParser ~ "=" ~/ Exp ~ ";").map(Const).log
 
     // def Prog[$: P]: P[List[Exp]] = P(
     //     ("def" ~ "main" ~ "(" ~ ")" ~ "=" ~/ Exp).map(s => List(Main(s))).log |
