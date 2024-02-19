@@ -19,8 +19,14 @@ object NewCPS {
         override def get_type = t
 
     case class KNum(i: Int) extends KVal:
-        override def get_type = PrimType("Int")
+        override def get_type = IntType
 
+    case class KBool(b: Boolean) extends KVal:
+        override def get_type = BoolType
+
+    case class KFloat(f: Double) extends KVal:
+        override def get_type = FloatType
+    
     sealed trait KExp
     case class Kop(o: String, v1: KVal, v2: KVal) extends KExp
     case class KCall(v: KVar, vrs: Seq[KVal]) extends KExp
@@ -38,6 +44,9 @@ object NewCPS {
     case class KFun(fnName: String, args: Seq[(String, Type)], ret: Type, body: KAnf, in: KAnf) extends KAnf:
         override def toString = s"FUN $fnName($args): $ret = { \n${pad(body)} \n} \n\n$in"
 
+    case class KWrite(v: KVal, in: KAnf) extends KAnf:
+        override def toString = s"PRINT $v \n$in" 
+
     case class KReturn(v: KVal) extends KAnf:
         override def toString = s"RETURN $v"
 
@@ -48,6 +57,8 @@ object NewCPS {
     def CPS(e: Exp, ty: TypeEnv = Map())(k: (KVal, TypeEnv) => KAnf) : KAnf = e match {
         case Var(s) => k(KVar(s, ty(s)), ty) 
         case Num(i) => k(KNum(i), ty)
+        case Bool(b) => k(KBool(b), ty)
+        case Flt(f) => k(KFloat(f), ty)
         case Op(e1, o, e2) => {
             val z = Fresh("tmp")
             CPS(e1, ty)((y1, t1) => 
@@ -76,10 +87,8 @@ object NewCPS {
         }
         case Sequence(e1, e2) => 
             CPS(e1, ty)((_, t1) => CPS(e2, t1)((y2, t2) => k(y2, t2)))
-        // case Write(e) => {
-        //     val z = Fresh("tmp")
-        //     CPS(e)(y => KLet(z, KWrite(y), k(KVar(z))))
-        // }
+        case Write(e) =>
+            CPS(e, ty)((y, t1) => KWrite(y, k(KVar("VOID", VoidType), t1)))
         case Const(i, t, v) =>
             val updated_ty = ty + (i -> t)
             CPS(v, updated_ty)((y, t1) => KLet(i, KExpVal(y), k(KVar(i), t1)))

@@ -1,14 +1,11 @@
 package compiler
 import NewCPS._
-import ValParser.Type
-import compiler.ValParser.FnType
-import compiler.ValParser.Missing
+import ValParser.{Type, FnType, EnvType}
 
 object ClosureConv {
 
     case class Env(name: String, vals: Seq[KVal])
     case class Ref(env: KVar, idx: Int)
-    case class EnvType(env: String) extends Type
 
     case class KLetEnv(x: String, env: Env, next: KAnf) extends KAnf {
         override def toString = s"LET $x = $env \n$next"
@@ -37,6 +34,7 @@ object ClosureConv {
         case KIf(x, e1, e2) => free_anf(e1) ++ free_anf(e2)
         case KReturn(v) => free_val(v)
         case KFun(fnName, args, _, body, in) => (free_anf(body) ++ free_anf(in)).filterNot(x => args.map(_._1).contains(x.s) || x.s == fnName)
+        case KWrite(v, in) => free_val(v) ++ free_anf(in)
     }
     
     // crime committed here
@@ -136,6 +134,7 @@ object ClosureConv {
         case KLet(x, v, e2) => KLet(x, v, remove_expval(e2))
         case KFun(fnName, args, ret, body, in) => KFun(fnName, args, ret, remove_expval(body), remove_expval(in))
         case KReturn(v) => KReturn(v)
+        case KWrite(v, in) => KWrite(v, remove_expval(in))
     }
 
     def update_types(a: KAnf, ty: Map[String, Type]): KAnf = a match {
@@ -161,8 +160,9 @@ object ClosureConv {
         case KIf(x, e1, e2) => KIf(x, update_types(e1, ty), update_types(e2, ty))
         case KLetEnv(x, env, e2) => KLetEnv(x, env, update_types(e2, ty + (x -> EnvType(env.name))))
         case KLetEnvRef(x, Ref(env, idx), e2) =>
-        // Type overriden by what environment says it is
+            // Type overriden by what environment says it is
             KLetEnvRef(x, Ref(KVar(env.s, ty.getOrElse(env.s, EnvType(env.s))), idx), update_types(e2, ty))
+        case KWrite(v, in) => KWrite(v, update_types(in, ty))
         case KReturn(v) => KReturn(update_val_types(v, ty)._1)
     }
 
@@ -170,7 +170,7 @@ object ClosureConv {
         case KVar(s, t) =>
             val t2 = ty.getOrElse(s, t)
             (KVar(s, t2), ty + (s -> t2))
-        case KNum(i) => (KNum(i), ty)
+        case v => (v, ty)
     }
 
 }

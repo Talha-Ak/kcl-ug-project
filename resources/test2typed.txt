@@ -1,14 +1,10 @@
-def foo(x: Int): (Int) => Int = {
-  def bar(y: Int): Int = x + y;
+def foo(x: Float): (Float) => Float = {
+  def bar(y: Float): Float = x + y;
   bar
 };
 
-def simple(a: Int): Int = a * 2;
-
-def rec(x: Int): Int = rec(1);
-
 def main() = {
-  val add: (Int) => Int = foo(3);
-  add(4)
+  val add: (Float) => Float = foo(9.3920);
+  print(add(10.9904));
+  0
 }
-

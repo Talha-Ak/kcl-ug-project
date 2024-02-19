@@ -3,10 +3,12 @@ import mainargs.{main, ParserForMethods}
 import os._
 import ValParser._, NewCPS._, ClosureConv._
 import fastparse.{parse, Parsed}
+import java.lang.Long.toHexString
+import java.lang.Double.doubleToLongBits
 
 object Compiler {
     def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args)
-    
+
     @main
     def print() = {
         val externalFile = scala.io.Source
@@ -23,7 +25,7 @@ object Compiler {
     @main
     def write() = {
         val externalFile = scala.io.Source
-            .fromResource("test2typed.txt")
+            .fromResource("testtyped.txt")
             .mkString
         val ast = fastparse.parse(externalFile, All(_))
         val code = ast match {
@@ -55,17 +57,31 @@ object Compiler {
     //     }
     // }
 
-    val prelude = """
-@.str = private constant [4 x i8] c"%d\0A\00"
+    val prelude = """@.str = private constant [4 x i8] c"%d\0A\00"
+@.str.1 = private constant [4 x i8] c"%f\0A\00"
 
 declare i32 @printf(i8*, ...)
 
-define i32 @printInt(i32 %x) {
+define void @print_i32(i32 %x) {
     %t0 = getelementptr [4 x i8], [4 x i8]* @.str, i32 0, i32 0
     call i32 (i8*, ...) @printf(i8* %t0, i32 %x) 
-    ret i32 %x
+    ret void
 }
 
+define void @print_i1(i1 %x) {
+    %t0 = getelementptr [4 x i8], [4 x i8]* @.str, i32 0, i32 0
+    call i32 (i8*, ...) @printf(i8* %t0, i1 %x) 
+    ret void
+}
+
+define void @print_float(float %x) {
+    %t0 = getelementptr [4 x i8], [4 x i8]* @.str.1, i32 0, i32 0
+    %t1 = fpext float %x to double      ; convert float to double
+    call i32 (i8*, ...) @printf(i8* %t0, double %t1) 
+    ret void
+}
+
+; <===== Generated code starts here =====>
 """
 
     // Another crime committed
@@ -73,78 +89,79 @@ define i32 @printInt(i32 %x) {
 
     extension (t: Type)
         def llvm: String = t match {
-            case PrimType("Int") => "i32"
-            case PrimType("Bool") => "i1"
-            case PrimType("Unit") => "void"
+            case IntType => "i32"
+            case BoolType => "i1"
+            case VoidType => "void"
+            case FloatType => "float"
             case EnvType(env) => s"%${env}_t*"
             case FnType(args, ret) => ret.llvm ++ " " ++ args.map(_.llvm).mkString("(", ", ", ")*")
             case t => "???"
         }
 
     extension (sc: StringContext) {
-        def i(args: Any*): String = "   " ++ sc.s(args:_*) ++ "\n"
+        def i(args: Any*): String = "    " ++ sc.s(args:_*) ++ "\n"
         def l(args: Any*): String = sc.s(args:_*) ++ ":\n"
         def m(args: Any*): String = sc.s(args:_*) ++ "\n"
         def c(args: Any*): String = "@" ++ sc.s(args:_*) ++ "\n"
     }
 
-    given Conversion[List[Env], String] = _.map {
-        case Env(name, vals) => {
-            vals.map{
-                // TODO remove this hack
-                case KVar(_, t) => t.llvm
-                case KNum(_) => PrimType("Int").llvm
-            }.mkString(s"%${name}_t = type { ", ", ", " }")
-        }
-    }.mkString("", "\n", "\n\n")
+
 
     // mathematical and boolean operations
-    def compile_op(op: String) = op match {
-        case "+" => "add i32"
-        case "*" => "mul i32"
-        case "-" => "sub i32"
-        case "/" => "sdiv i32"
-        case "%" => "srem i32"
-        case "==" => "icmp eq i32"
-        case "!=" => "icmp ne i32"
-        case "<=" => "icmp sle i32"
-        case "<"  => "icmp slt i32"
-        case ">=" => "icmp sge i32"
-        case ">"  => "icmp sgt i32"
+    // TODO: replace missing for float
+    def compile_op(op: String, t: Type) = {
+        val p = if t == FloatType then "f" else ""
+        val q = if t == FloatType then "f" else "s"
+        val r = if t == FloatType then "f" else "i"
+            op match {
+                case "+" => s"${p}add ${t.llvm}"
+                case "*" => s"${p}mul ${t.llvm}"
+                case "-" => s"${p}sub ${t.llvm}"
+                case "/" => s"${q}div ${t.llvm}"
+                case "%" => s"${q}rem ${t.llvm}"
+                case "==" => s"${r}cmp eq ${t.llvm}"
+                case "!=" => s"${r}cmp ne ${t.llvm}"
+                case "<=" => s"${r}cmp sle ${t.llvm}"
+                case "<"  => s"${r}cmp slt ${t.llvm}"
+                case ">=" => s"${r}cmp sge ${t.llvm}"
+                case ">"  => s"${r}cmp sgt ${t.llvm}"
+        }
     }
 
     // compile K values
     def compile_val(v: KVal) : String = v match {
-        case KNum(i) => s"$i"
         case KVar(s, _) => s"%$s"
+        case KNum(i) => i.toString
+        case KBool(b) => if b then "true" else "false"
+        case KFloat(f) => "0x" + toHexString(doubleToLongBits(f))
     }
 
     // compile K expressions
     def compile_exp(a: KExp) : String = a match {
         case KExpVal(v) => compile_val(v)
         case KCall(o, vrs) => {
-            val vs = vrs.map{
-                case KVar(s, t) => s"${t.llvm} %$s"
-                case KNum(i) => s"i32 $i"
-            }.mkString(", ")
+            val vs = vrs.map(v => s"${v.get_type.llvm} ${compile_val(v)}").mkString(", ")
             // If the first arg is an environment, we can assume this is a call to a pointer
             if vrs(0).get_type.isInstanceOf[EnvType]
                 then s"call ${o.t.llvm} %${o.s}($vs)"
                 else s"call ${o.t.llvm} @${o.s}($vs)"
         }
         case Kop(op, x1, x2) => 
-            s"${compile_op(op)} ${compile_val(x1)}, ${compile_val(x2)}"
+            s"${compile_op(op, x1.get_type)} ${compile_val(x1)}, ${compile_val(x2)}"
     }
 
-    def compile_env(x: String, env: Env) : String = {
+    def compile_env_defs(envs: List[Env]) : String = envs.map {
+        case Env(name, vals) => vals.map(_.get_type.llvm).mkString(s"%${name}_t = type { ", ", ", " }")
+    }.mkString("", "\n", "\n\n")
+
+    def compile_env_store(x: String, env: Env) : String = {
         val Env(name, vals) = env
         i"%$x = alloca %${name}_t" ++
         vals.zipWithIndex.map{ case (v, i) =>
             val get_elem_ptr = i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i"
             val store = v match {
                 case KVar(s, t: FnType) => i"store ${t.llvm} @$s, ${t.llvm}* %$x$i"
-                case KVar(_, t) => i"store ${t.llvm} ${compile_val(v)}, ${t.llvm}* %$x$i"
-                case KNum(n) => i"store i32 $n, i32* %$x$i"
+                case v => i"store ${v.get_type.llvm} ${compile_val(v)}, ${v.get_type.llvm}* %$x$i"
             }
             get_elem_ptr ++ store
         }.mkString
@@ -161,15 +178,22 @@ define i32 @printInt(i32 %x) {
         i"%$x = load ${env.vals(ref.idx).get_type.llvm}, ${env.vals(ref.idx).get_type.llvm}* %$ptr"
     }
 
+    def compile_return(v: KVal) : String = v match {
+        case KVar(_, VoidType) => i"ret void"
+        case v => i"ret ${v.get_type.llvm} ${compile_val(v)}"
+    }
+
+    def compile_write(v: KVal) = i"call void @print_${v.get_type.llvm}(${v.get_type.llvm} ${compile_val(v)})"
+
     def compile_anf(a: KAnf) : String = a match {
-        case KReturn(KVar(s, t)) => 
-            i"ret ${t.llvm} %$s"
-        case KReturn(v) =>
-            i"ret i32 ${compile_val(v)}"
+        case KReturn(v) => 
+            compile_return(v)
         case KLetEnv(x, env, a) =>
-            compile_env(x, env) ++ compile_anf(a)
+            compile_env_store(x, env) ++ compile_anf(a)
         case KLetEnvRef(x, ref, a) =>
             compile_env_ref(x, ref) ++ compile_anf(a)
+        case KWrite(v, a) =>
+            compile_write(v) ++ compile_anf(a)
         case KLet(x, e, a) => 
             i"%$x = ${compile_exp(e)}" ++ compile_anf(a)
         case KIf(x, e1, e2) => {
@@ -203,8 +227,8 @@ define i32 @printInt(i32 %x) {
         println("################")
         val (cfunc, anf, envs) = hoist(closure)
         program_envs = envs
-        val full_program = cfunc :+ CFunc("main", Nil, PrimType("Int"), anf)
-        val output = envs + full_program.map(compile_cfunc).mkString("\n")
+        val full_program = cfunc :+ CFunc("main", Nil, IntType, anf)
+        val output = prelude + compile_env_defs(envs) + full_program.map(compile_cfunc).mkString("\n")
         output
     }
 }

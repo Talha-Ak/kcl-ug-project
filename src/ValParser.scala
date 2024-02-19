@@ -5,38 +5,55 @@ import compiler.ClosureConv.Env
 object ValParser {
 
     sealed trait Exp
-    sealed trait BExp
-    trait Type
-
     case class Func(name: String, args: Seq[(String, Type)], ret: Type, body: Exp) extends Exp
     case class Const(i: String, t: Type, v: Exp) extends Exp
     case class Main(e: Exp) extends Exp
 
+    sealed trait BExp
     case class Call(name: String, args: Seq[Exp]) extends Exp
     case class If(a: Exp, e1: Exp, e2: Exp) extends Exp // TODO: change to BExp
     case class Write(e: Exp) extends Exp
     case class Var(s: String) extends Exp
     case class Num(i: Int) extends Exp
+    case class Bool(b: Boolean) extends Exp
+    case class Flt(f: Double) extends Exp // LLVM requires double precision floats.
     case class Op(a1: Exp, o: String, a2: Exp) extends Exp
     case class Sequence(e1: Exp, e2: Exp) extends Exp {
         override def toString = s"Sequence(\n$e1, $e2\n)"
     }
 
+    sealed trait Type
     case object Missing extends Type
+    case object VoidType extends Type
+    case object IntType extends Type
+    case object BoolType extends Type
+    case object FloatType extends Type
     case class PrimType(name: String) extends Type
     case class FnType(args: Seq[Type], ret: Type) extends Type
+    case class EnvType(env: String) extends Type
 
     // // Identifiers
     // //===============
     def NumParser[$: P] =
         P(CharsWhileIn("0-9", 1)).!.map(_.toInt)
 
+    def BoolParser[$: P] =
+        P("true").map(_ => true) |
+        P("false").map(_ => false)
+
+    def FloatParser[$: P] =
+        P(CharsWhileIn("0-9", 1) ~ "." ~ CharsWhileIn("0-9", 1)).!.map(_.toDouble)
+
     def IdParser[$: P] =
-        P(!StringIn("if", "then", "else", "write", "def") ~ CharIn("A-Za-z") ~~ CharsWhileIn("A-Za-z0-9_", 0)).!
+        P(!StringIn("if", "then", "else", "print", "def", "val", "true", "false") ~ CharIn("A-Za-z") ~~ CharsWhileIn("A-Za-z0-9_", 0)).!
 
     def TypeParser[$: P]: P[Type] =
         P("(" ~ TypeParser.rep(0, ",") ~ ")" ~ "=>" ~ TypeParser).map(FnType) |
-        IdParser.map(PrimType) // TODO: Make bespoke parser for types
+        P("Int").map(_ => IntType) |
+        P("Bool").map(_ => BoolType) |
+        P("Void").map(_ => VoidType) |
+        P("Float").map(_ => FloatType) |
+        IdParser.map(PrimType)
     
     def TypedIdParser[$: P] = P(IdParser ~ ":" ~ TypeParser)
 
@@ -44,7 +61,7 @@ object ValParser {
     //===============
     def Exp[$: P]: P[Exp] = P(
         ("if" ~ Equal ~ "then" ~ Exp ~ "else" ~ Exp).map(If).log("if") |
-        ("write" ~ Equal).map(Write) |
+        ("print" ~ "(" ~ Exp ~ ")").map(Write) |
         Block |
         Equal
     )
@@ -62,10 +79,13 @@ object ValParser {
     def Term[$: P]: P[Exp] = P(Fact ~ (CharIn("+\\-").! ~ Fact).rep(0)).map(leftAssociate(_,_)).log
     def Fact[$: P]: P[Exp] = P(Primary ~ (CharIn("/*%").! ~ Primary).rep(0)).map(leftAssociate(_,_))
     def Primary[$: P]: P[Exp] = P(
+        ("print" ~ "(" ~ Exp ~ ")").map(Write) |
         (IdParser ~ "(" ~ Exp.rep(0, ",") ~ ")").map(Call) |
         ("(" ~ Exp ~ ")") |
-        IdParser.map(Var) |
-        NumParser.map(Num)
+        FloatParser.map(Flt) |
+        NumParser.map(Num) |
+        BoolParser.map(Bool) |
+        IdParser.map(Var)
     )
 
     def DefFn[$: P]: P[Exp] =

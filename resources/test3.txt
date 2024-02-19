@@ -1,0 +1,8 @@
+def square(x: Int): Int = x * x;
+def apply(f: (Int) => Int, x: Int): Int = f(x);
+
+def main() = {
+	val output: Int = apply(square, 10);
+    print(0);
+	print(output)
+}
