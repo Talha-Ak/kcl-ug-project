@@ -25,7 +25,7 @@ object Compiler {
     @main
     def write() = {
         val externalFile = scala.io.Source
-            .fromResource("testtyped.txt")
+            .fromResource("enumtest.txt")
             .mkString
         val ast = fastparse.parse(externalFile, All(_))
         val code = ast match {
@@ -86,16 +86,25 @@ define void @print_float(float %x) {
 
     // Another crime committed
     var program_envs: List[Env] = Nil
+    var program_types: Map[String, Type] = Map()
+    var program_funcs: List[CFunc] = Nil
 
     extension (t: Type)
         def llvm: String = t match {
             case IntType => "i32"
+            case EnumType(_) => "i32"
             case BoolType => "i1"
             case VoidType => "void"
             case FloatType => "float"
             case EnvType(env) => s"%${env}_t*"
             case FnType(args, ret) => ret.llvm ++ " " ++ args.map(_.llvm).mkString("(", ", ", ")*")
-            case t => "???"
+            case UserType(name) => {
+                val cur_type = program_types.get(name)
+                cur_type match {
+                    case Some(t) => t.llvm
+                    case None => throw new Exception(s"Type $name not found in $program_types")
+                }
+            }
         }
 
     extension (sc: StringContext) {
@@ -130,21 +139,22 @@ define void @print_float(float %x) {
 
     // compile K values
     def compile_val(v: KVal) : String = v match {
+        case KVar(s, _: FnType) if program_funcs.exists(_.fname == s) => s"@${s}"
         case KVar(s, _) => s"%$s"
         case KNum(i) => i.toString
         case KBool(b) => if b then "true" else "false"
         case KFloat(f) => "0x" + toHexString(doubleToLongBits(f))
+        case KEnum(root, item) => s"$root::$item"
     }
 
     // compile K expressions
     def compile_exp(a: KExp) : String = a match {
-        case KExpVal(v) => compile_val(v)
-        case KCall(o, vrs) => {
+        case KCall(KVar(name, FnType(args, ret)), vrs) => {
             val vs = vrs.map(v => s"${v.get_type.llvm} ${compile_val(v)}").mkString(", ")
             // If the first arg is an environment, we can assume this is a call to a pointer
-            if vrs(0).get_type.isInstanceOf[EnvType]
-                then s"call ${o.t.llvm} %${o.s}($vs)"
-                else s"call ${o.t.llvm} @${o.s}($vs)"
+            if program_funcs.exists(_.fname == name)
+            then s"call ${ret.llvm} @${name}($vs)"
+            else s"call ${ret.llvm} %${name}($vs)"
         }
         case Kop(op, x1, x2) => 
             s"${compile_op(op, x1.get_type)} ${compile_val(x1)}, ${compile_val(x2)}"
@@ -167,15 +177,19 @@ define void @print_float(float %x) {
         }.mkString
     }
     
-    def compile_env_ref(x: String, ref: Ref) : String = {
-        val actual_name = ref.env match {
-            case KVar(_, t: EnvType) => t.env
-            case _ => throw new Exception(s"Expected environment type, got ${ref.env}")
+    def compile_fn_ref(x: String, ref: Ref) : String = ref.env match {
+        case KVar(_, t: EnvType) => {
+            val actual_name = t.env
+            val env = program_envs.find(_.name == actual_name).get
+            val ptr = Fresh("ptr")
+            i"%$ptr = getelementptr %${env.name}_t, %${env.name}_t* %${ref.env.s}, i32 0, i32 ${ref.idx}" ++
+            i"%$x = load ${env.vals(ref.idx).get_type.llvm}, ${env.vals(ref.idx).get_type.llvm}* %$ptr"
         }
-        val env = program_envs.find(_.name == actual_name).get
-        val ptr = Fresh("ptr")
-        i"%$ptr = getelementptr %${env.name}_t, %${env.name}_t* %${ref.env.s}, i32 0, i32 ${ref.idx}" ++
-        i"%$x = load ${env.vals(ref.idx).get_type.llvm}, ${env.vals(ref.idx).get_type.llvm}* %$ptr"
+        case KVar(s, t: FnType) => {
+            val actual_name = s
+            i"%$x = load ${t.llvm}, ${t.llvm} %$s"
+        }
+        case _ => throw new Exception(s"Expected environment type, got ${ref.env}")
     }
 
     def compile_return(v: KVal) : String = v match {
@@ -191,7 +205,7 @@ define void @print_float(float %x) {
         case KLetEnv(x, env, a) =>
             compile_env_store(x, env) ++ compile_anf(a)
         case KLetEnvRef(x, ref, a) =>
-            compile_env_ref(x, ref) ++ compile_anf(a)
+            compile_fn_ref(x, ref) ++ compile_anf(a)
         case KWrite(v, a) =>
             compile_write(v) ++ compile_anf(a)
         case KLet(x, e, a) => 
@@ -206,6 +220,7 @@ define void @print_float(float %x) {
             compile_anf(e2)
         }
         case fun: KFun => throw new Exception(s"KFun '${fun.fnName}' should not be in closed ANF")
+        case kconst: KConst => throw new Exception(s"KConst '${kconst.x}' should not be present after postprocess")
     }
 
     def compile_cfunc(f: CFunc) : String = {
@@ -219,17 +234,22 @@ define void @print_float(float %x) {
     }
 
     def compile_comb(prog: Exp) : String = {
-        val cps = remove_expval(CPSi(prog))
+        val (enums, no_enums) = PreProcess.preprocess(prog)
+        val cps = CPSi(no_enums)
         println(cps)
         println("################")
-        val (closure, _) = convert(cps)
+        val ppcps = PostProcess.postprocess(cps, enums)
+        println(ppcps)
+        println("################11")
+        val (closure, _) = convert(ppcps)
         println(closure)
         println("################")
         val (cfunc, anf, envs) = hoist(closure)
         program_envs = envs
+        program_types = enums
+        program_funcs = cfunc
         val full_program = cfunc :+ CFunc("main", Nil, IntType, anf)
         val output = prelude + compile_env_defs(envs) + full_program.map(compile_cfunc).mkString("\n")
         output
     }
 }
-

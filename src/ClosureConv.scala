@@ -1,20 +1,17 @@
 package compiler
 import NewCPS._
 import ValParser.{Type, FnType, EnvType}
+import compiler.ValParser.Missing
+import compiler.ValParser.VoidType
+import compiler.ValParser.IntType
+import compiler.ValParser.BoolType
+import compiler.ValParser.FloatType
+import compiler.ValParser.UserType
+import compiler.ValParser.EnumType
 
 object ClosureConv {
 
-    case class Env(name: String, vals: Seq[KVal])
-    case class Ref(env: KVar, idx: Int)
-
-    case class KLetEnv(x: String, env: Env, next: KAnf) extends KAnf {
-        override def toString = s"LET $x = $env \n$next"
-    }
-    case class KLetEnvRef(x: String, ref: Ref, next: KAnf) extends KAnf {
-        override def toString = s"LET $x = $ref \n$next"
-    }
-    
-    sealed case class CFunc(fname: String, args: Seq[(String, Type)], ret: Type, body: KAnf) {
+    case class CFunc(fname: String, args: Seq[(String, Type)], ret: Type, body: KAnf) {
         override def toString = s"fun $fname($args):\n$body\nEND"
     }
 
@@ -26,11 +23,11 @@ object ClosureConv {
     def free_exp(e: KExp): Set[KVar] = e match {
         case Kop(o, v1, v2) => free_val(v1) ++ free_val(v2)
         case KCall(o, vrs) => vrs.flatMap(free_val).toSet
-        case KExpVal(v) => free_val(v)
     }
 
     def free_anf(e: KAnf): Set[KVar] = e match {
         case KLet(x, e1, e2) => (free_exp(e1) ++ free_anf(e2)).filterNot(_.s == x)
+        case KConst(x, v, e) => free_val(v) ++ free_anf(e)
         case KIf(x, e1, e2) => free_anf(e1) ++ free_anf(e2)
         case KReturn(v) => free_val(v)
         case KFun(fnName, args, _, body, in) => (free_anf(body) ++ free_anf(in)).filterNot(x => args.map(_._1).contains(x.s) || x.s == fnName)
@@ -52,18 +49,18 @@ object ClosureConv {
                 env match
                     case None => (KFun(fnName, args, ret, body2, in2), None)
                     case Some(e) =>
-                        val updated_body = update_types(body2, Map(fnName -> EnvType(e.name)))
-                        val updated_in = update_types(in2, Map(fnName -> EnvType(e.name)))
+                        val updated_type = FnType(args.map(_._2), EnvType(e.name))
+                        val updated_body = update_types(body2, Map(fnName -> updated_type))
+                        val updated_in = update_types(in2, Map(fnName -> updated_type))
                         (KFun(fnName, args, EnvType(e.name), updated_body, updated_in), None)
-                }
-                else {
+            } else {
                 val (converted_body, next_env) = convert(body)
 
                 val envId = Fresh("env")
                 val newArgs = (envId, EnvType(envId)) +: args
                 val newRet = if next_env.isEmpty then ret else EnvType(next_env.get.name)
-                val env = Env(envId, KVar(fnName, FnType(newArgs.map(_._2), newRet)) :: fvs)
-                println(s"The env for " + fnName + " is " + env)
+                val newType = FnType(newArgs.map(_._2), newRet)
+                val env = Env(envId, KVar(fnName, newType) :: fvs)
                 
                 // For each free variable, add a line that extracts it from the environment
                 val (body2, _) = fvs.zipWithIndex.foldLeft(converted_body, 1) { // missing nested envs
@@ -75,21 +72,14 @@ object ClosureConv {
                 // LET fn = (@fn, fvs...) IN anf
                 val let_env = KLetEnv(fnName, env, in2)
 
-
-                val updated_body = update_types(body2, Map(fnName -> newRet))
-                val updated_in = update_types(let_env, Map(fnName -> newRet))
+                val updated_body = update_types(body2, Map(fnName -> newType))
+                val updated_in = update_types(let_env, Map(fnName -> newType))
                 (KFun(fnName, newArgs, newRet, updated_body, updated_in), Some(env))
             }
         }
-        case KLet(x, KCall(fn, vrs), e2) => {
-            val ptr = Fresh("ptr")
-            if glob_fns.contains(fn.s) then
-                val (in, env) = convert(e2)
-                (KLet(x, KCall(fn, vrs), in), env)
-            else
-                val (in, env) = convert(e2)
-                (KLetEnvRef(ptr, Ref(fn, 0), KLet(x, KCall(KVar(ptr, fn.t), fn +: vrs), in)), env)
-        }
+        case KLet(x, KCall(fn, vrs), e2) =>
+            val (in, env) = convert(e2)
+            (KLet(x, KCall(fn, vrs), in), env)
         case KLet(x, e1, e2) =>
             val (in, env) = convert(e2)
             (KLet(x, e1, in), env)
@@ -97,6 +87,9 @@ object ClosureConv {
             val (t, env_t) = convert(e1)
             val (f, env_f) = convert(e2)
             (KIf(v, t, f), env_t.orElse(env_f))
+        case KConst(x, v, e) => 
+            val (in, env) = convert(e)
+            (KConst(x, v, in), env)
         case _ => (e, None)
     }
 
@@ -123,41 +116,55 @@ object ClosureConv {
             val (fns, e1, envs) = hoist(next)
             (fns, KLet(x, v, e1), envs)
         }
+        case KConst(x, v, e) => {
+            val (fns, e1, envs) = hoist(e)
+            (fns, KConst(x, v, e1), envs)
+        }
         case _ => (Nil, e, Nil)
-    }
-
-    def remove_expval(a: KAnf): KAnf = a match {
-        case KLet(x, e1, KLet(y, KExpVal(_), e2)) => KLet(y, e1, remove_expval(e2))
-        case KIf(x, e1, e2) => KIf(x, remove_expval(e1), remove_expval(e2))
-        case KLetEnv(x, env, e2) => KLetEnv(x, env, remove_expval(e2))
-        case KLetEnvRef(x, ref, e2) => KLetEnvRef(x, ref, remove_expval(e2))
-        case KLet(x, v, e2) => KLet(x, v, remove_expval(e2))
-        case KFun(fnName, args, ret, body, in) => KFun(fnName, args, ret, remove_expval(body), remove_expval(in))
-        case KReturn(v) => KReturn(v)
-        case KWrite(v, in) => KWrite(v, remove_expval(in))
     }
 
     def update_types(a: KAnf, ty: Map[String, Type]): KAnf = a match {
         case KLet(x, e1, e2) => e1 match {
+
             case Kop(o, v1, v2) =>
                 val (uv1, v1_ty) = update_val_types(v1, ty)
                 KLet(x, Kop(o, uv1, v2), update_types(e2, ty + (x -> v1.get_type)))
+
             case KCall(o, vrs) => 
                 val call_ty = ty.getOrElse(o.s, o.t)
-                vrs.foldLeft((Seq[KVal](), ty)) { case ((vs, t), v) =>
-                    val (uv, t2) = update_val_types(v, t)
-                    (vs :+ uv, t2)
-                } match { case (vrs, ty) => KLet(x, KCall(KVar(o.s, call_ty), vrs), update_types(e2, ty + (x -> call_ty))) }
-            case KExpVal(v) => throw new Exception("KExpVals should be removed by now")
+                call_ty match {
+                    case FnType(args, ret) => {
+                        val (updated_vals, updated_vals_ty) = vrs.foldLeft((Seq[KVal](), ty)) {
+                            case ((vs, t), v) =>
+                                val (uv, t2) = update_val_types(v, t)
+                                (vs :+ uv, t2)
+                        }
+                        KLet(x, KCall(KVar(o.s, call_ty), updated_vals), update_types(e2, updated_vals_ty + (x -> ret)))
+                    }
+                    case EnvType(env) => {
+                        val (updated_vals, updated_vals_ty) = vrs.foldLeft((Seq[KVal](), ty)) {
+                            case ((vs, t), v) =>
+                                val (uv, t2) = update_val_types(v, t)
+                                (vs :+ uv, t2)
+                        }
+                        val ptr = Fresh("ptr")
+                        val env_fn = KVar(o.s, call_ty)
+                        KLetEnvRef(ptr, Ref(env_fn, 0), KLet(x, KCall(KVar(ptr, o.t), env_fn +: updated_vals), update_types(e2, updated_vals_ty + (x -> EnvType(env)))))
+                    }
+                    case _ => throw new Exception(s"$ty \nExpected function type for $o, got ${ty(o.s)} $vrs")
+                }
         }
         case KFun(fnName, args, ret, body, in) =>
-            val fn_ty = ty.getOrElse(fnName, ret)
+            val fn_ty = ty.getOrElse(fnName, FnType(args.map(_._2), ret))
             val body_ty = ty ++ args + (fnName -> fn_ty)
             val body2 = update_types(body, body_ty)
             val in_ty = ty + (fnName -> fn_ty)
             val in2 = update_types(in, in_ty)
             KFun(fnName, args, ret, body2, in2)
         case KIf(x, e1, e2) => KIf(x, update_types(e1, ty), update_types(e2, ty))
+        case KConst(x, v, e) => 
+            val (uv, v_ty) = update_val_types(v, ty)
+            KConst(x, uv, update_types(e, ty + (x -> uv.get_type)))
         case KLetEnv(x, env, e2) => KLetEnv(x, env, update_types(e2, ty + (x -> EnvType(env.name))))
         case KLetEnvRef(x, Ref(env, idx), e2) =>
             // Type overriden by what environment says it is

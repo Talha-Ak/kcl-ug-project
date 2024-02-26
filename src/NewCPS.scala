@@ -26,17 +26,22 @@ object NewCPS {
 
     case class KFloat(f: Double) extends KVal:
         override def get_type = FloatType
+
+    case class KEnum(root: String, item: String) extends KVal:
+        override def get_type = IntType
     
     sealed trait KExp
     case class Kop(o: String, v1: KVal, v2: KVal) extends KExp
     case class KCall(v: KVar, vrs: Seq[KVal]) extends KExp
-    case class KExpVal(v: KVal) extends KExp
 
-    trait KAnf:
+    sealed trait KAnf:
         def pad(e: KAnf) = e.toString.replaceAll("(?m)^", "  ")
 
     case class KLet(x: String, e1: KExp, e2: KAnf) extends KAnf:
         override def toString = s"LET $x = $e1 \n$e2" 
+
+    case class KConst(x: String, v: KVal, e: KAnf) extends KAnf:
+        override def toString = s"CONST $x = $v \n$e"
 
     case class KIf(v: String, e1: KAnf, e2: KAnf) extends KAnf:
         override def toString = s"IF $v \nTHEN \n${pad(e1)} \nELSE \n${pad(e2)}"
@@ -50,6 +55,16 @@ object NewCPS {
     case class KReturn(v: KVal) extends KAnf:
         override def toString = s"RETURN $v"
 
+    // For handling closures
+    case class Env(name: String, vals: Seq[KVal])
+    case class Ref(env: KVar, idx: Int)
+    case class KLetEnv(x: String, env: Env, next: KAnf) extends KAnf {
+        override def toString = s"LET $x = $env \n$next"
+    }
+    case class KLetEnvRef(x: String, ref: Ref, next: KAnf) extends KAnf {
+        override def toString = s"LET $x = $ref \n$next"
+    }
+
     type TypeEnv = Map[String, Type]
 
     // CPS translation from Exps to KExps using a
@@ -59,6 +74,7 @@ object NewCPS {
         case Num(i) => k(KNum(i), ty)
         case Bool(b) => k(KBool(b), ty)
         case Flt(f) => k(KFloat(f), ty)
+        case EnumRef(root, item) => k(KEnum(root, item), ty)
         case Op(e1, o, e2) => {
             val z = Fresh("tmp")
             CPS(e1, ty)((y1, t1) => 
@@ -66,9 +82,10 @@ object NewCPS {
         }
         case If(Op(b1, o, b2), e1, e2) => {
             val z = Fresh("tmp")
+            val next = e2.getOrElse(Op(Num(0), "+", Num(0)))
             CPS(b1, ty)((y1, t1) => 
                 CPS(b2, t1)((y2, t2) => 
-                    KLet(z, Kop(o, y1, y2), KIf(z, CPS(e1, t2)(k), CPS(e2, t2)(k))))) // TODO: Check if t2 for both is correct
+                    KLet(z, Kop(o, y1, y2), KIf(z, CPS(e1, t2)(k), CPS(next, t2)(k))))) // TODO: Check if t2 for both is correct
         }
         case Call(name, args) => {
             def aux(args: Seq[Exp], vs: List[KVal], ty: TypeEnv) : KAnf = args match {
@@ -78,7 +95,7 @@ object NewCPS {
                         case FnType(_, t) => t
                         case _ => throw new Exception(s"Expected function type for $name")
                     }
-                    val fn_call = KVar(name, retTy)
+                    val fn_call = KVar(name, ty(name))
                     KLet(z, KCall(fn_call, vs), k(KVar(z, retTy), ty))
                 }
                 case e::es => CPS(e, ty)((y, t1) => aux(es, vs ::: List(y), t1))
@@ -91,7 +108,7 @@ object NewCPS {
             CPS(e, ty)((y, t1) => KWrite(y, k(KVar("VOID", VoidType), t1)))
         case Const(i, t, v) =>
             val updated_ty = ty + (i -> t)
-            CPS(v, updated_ty)((y, t1) => KLet(i, KExpVal(y), k(KVar(i), t1)))
+            CPS(v, updated_ty)((y, t1) => KConst(i, y, k(KVar(i), t1)))
         case Func(name, args, ret, body) =>
             val updated_ty = ty ++ args.map{case (x, t) => (x, t)} + (name -> FnType(args.map(_._2).toList, ret))
             KFun(name, args, ret, CPS(body, updated_ty)((y, _) => KReturn(y)), k(KVar(name), ty + (name -> FnType(args.map(_._2).toList, ret))))
@@ -99,5 +116,5 @@ object NewCPS {
     }   
 
     //initial continuation
-    def CPSi(e: Exp) = CPS(e)((y, _) => KReturn(y))
+    def CPSi(e: Exp) = CPS(e)((y, ty) => KReturn(y))
 }
