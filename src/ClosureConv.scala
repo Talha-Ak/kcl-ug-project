@@ -22,6 +22,7 @@ object ClosureConv {
 
     def free_exp(e: KExp): Set[KVar] = e match {
         case Kop(o, v1, v2) => free_val(v1) ++ free_val(v2)
+        case KStructDec(struct, vals) => vals.flatMap(free_val).toSet
         case KCall(o, vrs) => vrs.flatMap(free_val).toSet
     }
 
@@ -29,9 +30,10 @@ object ClosureConv {
         case KLet(x, e1, e2) => (free_exp(e1) ++ free_anf(e2)).filterNot(_.s == x)
         case KConst(x, v, e) => free_val(v) ++ free_anf(e)
         case KIf(x, e1, e2) => free_anf(e1) ++ free_anf(e2)
-        case KReturn(v) => free_val(v)
         case KFun(fnName, args, _, body, in) => (free_anf(body) ++ free_anf(in)).filterNot(x => args.map(_._1).contains(x.s) || x.s == fnName)
+        case KStructDef(_, in) => free_anf(in)
         case KWrite(v, in) => free_val(v) ++ free_anf(in)
+        case KReturn(v) => free_val(v)
     }
     
     // crime committed here
@@ -90,37 +92,44 @@ object ClosureConv {
         case KConst(x, v, e) => 
             val (in, env) = convert(e)
             (KConst(x, v, in), env)
+        case KStructDef(struct, e) =>
+            val (in, env) = convert(e)
+            (KStructDef(struct, in), env)
         case _ => (e, None)
     }
 
-    def hoist(e: KAnf): (List[CFunc], KAnf, List[Env]) = e match {
+    def hoist(e: KAnf): (List[CFunc], KAnf, List[Env], List[Struct]) = e match {
         case KFun(fnName, args, ret, body, next) => {
-            val (fns, e, envs) = hoist(body)
-            val (fns2, e2, envs2) = hoist(next)
+            val (fns, e, envs, structs) = hoist(body)
+            val (fns2, e2, envs2, structs2) = hoist(next)
             val entry = Fresh("entry")
             val fn = CFunc(fnName, args, ret, e)
-            (fn :: fns ::: fns2, e2, envs ::: envs2)
+            (fn :: fns ::: fns2, e2, envs ::: envs2, structs ::: structs2)
         }
         case KIf(x1, e1, e2) => {
-            val (fns, t, envs) = hoist(e1)
-            val (fns2, f, envs2) = hoist(e2)
+            val (fns, t, envs, structs) = hoist(e1)
+            val (fns2, f, envs2, structs2) = hoist(e2)
             val thn = Fresh("then")
             val els = Fresh("else")
-            (fns ::: fns2, KIf(x1, t, f), envs ::: envs2)
+            (fns ::: fns2, KIf(x1, t, f), envs ::: envs2, structs ::: structs2)
         }
         case KLetEnv(x, env: Env, next) => {
-            val (fns, e1, envs) = hoist(next)
-            (fns, KLetEnv(x, env, e1), env :: envs)
+            val (fns, e1, envs, structs) = hoist(next)
+            (fns, KLetEnv(x, env, e1), env :: envs, structs)
         }
         case KLet(x, v, next) => {
-            val (fns, e1, envs) = hoist(next)
-            (fns, KLet(x, v, e1), envs)
+            val (fns, e1, envs, structs) = hoist(next)
+            (fns, KLet(x, v, e1), envs, structs)
         }
         case KConst(x, v, e) => {
-            val (fns, e1, envs) = hoist(e)
-            (fns, KConst(x, v, e1), envs)
+            val (fns, e1, envs, structs) = hoist(e)
+            (fns, KConst(x, v, e1), envs, structs)
         }
-        case _ => (Nil, e, Nil)
+        case KStructDef(struct, e) => {
+            val (fns, e1, envs, structs) = hoist(e)
+            (fns, KStructDef(struct, e1), envs, struct :: structs)
+        }
+        case _ => (Nil, e, Nil, Nil)
     }
 
     def update_types(a: KAnf, ty: Map[String, Type]): KAnf = a match {
@@ -165,6 +174,8 @@ object ClosureConv {
         case KConst(x, v, e) => 
             val (uv, v_ty) = update_val_types(v, ty)
             KConst(x, uv, update_types(e, ty + (x -> uv.get_type)))
+        case KStructDef(struct, e) => 
+            KStructDef(struct, update_types(e, ty + (struct.name -> UserType(struct.name))))
         case KLetEnv(x, env, e2) => KLetEnv(x, env, update_types(e2, ty + (x -> EnvType(env.name))))
         case KLetEnvRef(x, Ref(env, idx), e2) =>
             // Type overriden by what environment says it is

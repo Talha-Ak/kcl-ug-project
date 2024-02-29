@@ -9,6 +9,7 @@ object ValParser {
     case class Func(name: String, args: Seq[(String, Type)], ret: Type, body: Exp) extends Exp
     case class Const(i: String, t: Type, v: Exp) extends Exp
     case class EnumDef(name: String, vals: Seq[String]) extends Exp
+    case class StructDef(name: String, items: Seq[(String, Type)]) extends Exp
     case class Main(e: Exp) extends Exp
 
     sealed trait BExp
@@ -19,6 +20,7 @@ object ValParser {
     case class Write(e: Exp) extends Exp
     case class Var(s: String) extends Exp
     case class EnumRef(root: String, item: String) extends Exp
+    case class StructRef(root: String, item: String) extends Exp
     case class Num(i: Int) extends Exp
     case class Bool(b: Boolean) extends Exp
     case class Flt(f: Double) extends Exp // LLVM requires double precision floats.
@@ -54,7 +56,10 @@ object ValParser {
         P(!StringIn("if", "then", "else", "print", "def", "val", "true", "false") ~ CharIn("A-Za-z_") ~~ CharsWhileIn("A-Za-z0-9_", 0)).!
         
     def EnumRefParser[$: P] =
-        P(IdParser.! ~ "::" ~ IdParser.!)
+        P(IdParser.! ~~ "::" ~~ IdParser.!)
+
+    def StructRefParser[$: P] =
+        P(IdParser.! ~~ "." ~~ IdParser.!)
 
     def TypeParser[$: P]: P[Type] =
         P("(" ~ TypeParser.rep(0, ",") ~ ")" ~ "=>" ~ TypeParser).map(FnType) |
@@ -103,6 +108,7 @@ object ValParser {
         (IdParser ~ "(" ~ Exp.rep(0, ",") ~ ")").map(Call) |
         ("(" ~ Exp ~ ")") |
         EnumRefParser.map(EnumRef) |
+        StructRefParser.map(StructRef) |
         FloatParser.map(Flt) |
         NumParser.map(Num) |
         BoolParser.map(Bool) |
@@ -110,11 +116,13 @@ object ValParser {
     )
 
     def DefFn[$: P]: P[Exp] =
-        P("def" ~ IdParser ~ "(" ~ TypedIdParser.rep(0, ",") ~ ")" ~ ":" ~ TypeParser ~ "=" ~/ Exp ~ ";").map(Func).log
+        P("def" ~/ IdParser ~ "(" ~ TypedIdParser.rep(0, ",") ~ ")" ~ ":" ~ TypeParser ~ "=" ~/ Exp ~ ";").map(Func).log
     def DefVal[$: P]: P[Exp] =
-        P("val" ~ TypedIdParser ~ "=" ~/ Exp ~ ";").map(Const).log
+        P("val" ~/ TypedIdParser ~ "=" ~/ Exp ~ ";").map(Const).log
     def DefEnum[$: P]: P[Exp] =
-        P("enum" ~ IdParser ~ "=" ~ IdParser.rep(1, "|") ~ ";").map(EnumDef).log
+        P("enum" ~/ IdParser ~ "=" ~ IdParser.rep(1, "|") ~ ";").map(EnumDef).log
+    def DefStruct[$: P]: P[Exp] =
+        P("struct" ~/ IdParser ~ "=" ~ "{" ~ TypedIdParser.rep(1, ",") ~ "}" ~ ";").map(StructDef).log
 
     // def Prog[$: P]: P[List[Exp]] = P(
     //     ("def" ~ "main" ~ "(" ~ ")" ~ "=" ~/ Exp).map(s => List(Main(s))).log |
@@ -124,7 +132,8 @@ object ValParser {
     def Prog[$: P]: P[Exp] = P(
         ("def" ~ "main" ~ "(" ~ ")" ~ "=" ~/ Exp).map(s => s).log |
         (DefFn ~/ Prog).map((a, b) => Sequence(a, b)) |
-        (DefEnum ~/ Prog).map((a, b) => Sequence(a, b))
+        (DefEnum ~/ Prog).map((a, b) => Sequence(a, b)) |
+        (DefStruct ~/ Prog).map((a, b) => Sequence(a, b))
     )
 
     def All[$: P] = Prog ~ End

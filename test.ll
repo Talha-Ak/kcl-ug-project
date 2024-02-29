@@ -23,83 +23,48 @@ define void @print_float(float %x) {
 }
 
 ; <===== Generated code starts here =====>
-%env_11_t = type { float (%env_11_t*, float)*, float }
 
-define %env_11_t* @foo (float %x) {
-    %bar = alloca %env_11_t
-    %bar0 = getelementptr %env_11_t, %env_11_t* %bar, i32 0, i32 0
-    store float (%env_11_t*, float)* @bar, float (%env_11_t*, float)** %bar0
-    %bar1 = getelementptr %env_11_t, %env_11_t* %bar, i32 0, i32 1
-    store float %x, float* %bar1
-    ret %env_11_t* %bar
-}
 
-define float @bar (%env_11_t* %env_11, float %y) {
-    %ptr_27 = getelementptr %env_11_t, %env_11_t* %env_11, i32 0, i32 1
-    %x = load float, float* %ptr_27
-    %tmp_0 = fadd float %x, %y
-    ret float %tmp_0
-}
+%Student = type { i32, i1, float }
 
-define i1 @da (i32 %x) {
-    %tmp_1 = icmp eq i32 %x, 1
-    br i1 %tmp_1, label %if_branch_28, label %else_branch_29
-
-if_branch_28:
-    ret i1 true
-
-else_branch_29:
-    ret i1 false
-}
-
-define i32 @main2 () {
-    %add = call %env_11_t* @foo(float 0x3ff0000000000000)
-    %test = add i32 0, 0
-    %tmp_3 = icmp eq i32 %test, 0
-    br i1 %tmp_3, label %if_branch_30, label %else_branch_31
-
-if_branch_30:
-    %tmp_4 = icmp eq i32 %test, 0
-    br i1 %tmp_4, label %if_branch_32, label %else_branch_33
-
-if_branch_32:
-    call void @print_i32(i32 99)
-    ret i32 0
-
-else_branch_33:
-    %tmp_5 = add i32 0, 0
-    call void @print_i32(i32 %tmp_5)
-    ret i32 0
-
-else_branch_31:
-    %tmp_6 = icmp eq i32 %test, 4
-    br i1 %tmp_6, label %if_branch_34, label %else_branch_35
-
-if_branch_34:
-    %ptr_36 = getelementptr %env_11_t, %env_11_t* %add, i32 0, i32 0
-    %ptr_12 = load float (%env_11_t*, float)*, float (%env_11_t*, float)** %ptr_36
-    %tmp_7 = call float %ptr_12(%env_11_t* %add, float 0x4000000000000000)
-    call void @print_float(float %tmp_7)
-    ret i32 0
-
-else_branch_35:
-    call void @print_i32(i32 0)
-    ret i32 0
-}
-
-define i32 @square (i32 %x) {
-    %tmp_8 = mul i32 %x, %x
-    ret i32 %tmp_8
-}
-
-define i32 @apply (i32 (i32)* %f, i32 %x) {
-    %tmp_9 = call i32 %f(i32 %x)
-    ret i32 %tmp_9
+define %Student* @something (i32 %x) {
+    %tmp_0 = alloca %Student
+    %tmp_0_0 = getelementptr %Student, %Student* %tmp_0, i32 0, i32 0
+    store i32 %x, i32* %tmp_0_0
+    %tmp_0_1 = getelementptr %Student, %Student* %tmp_0, i32 0, i32 1
+    store i1 true, i1* %tmp_0_1
+    %tmp_0_2 = getelementptr %Student, %Student* %tmp_0, i32 0, i32 2
+    store float 0x4052c00000000000, float* %tmp_0_2
+    ret %Student* %tmp_0
 }
 
 define i32 @main () {
-    %output = call i32 @apply(i32 (i32)* @square, i32 10)
+    %st = alloca %Student
+    %st_0 = getelementptr %Student, %Student* %st, i32 0, i32 0
+    store i32 20, i32* %st_0
+    %st_1 = getelementptr %Student, %Student* %st, i32 0, i32 1
+    store i1 false, i1* %st_1
+    %st_2 = getelementptr %Student, %Student* %st, i32 0, i32 2
+    store float 0x4056400000000000, float* %st_2
+    %ret = call %Student* @something(i32 20)
     call void @print_i32(i32 0)
-    call void @print_i32(i32 %output)
+    %ptr_4 = getelementptr %Student, %Student* %st, i32 0, i32 0
+    %el_5 = load i32, i32* %ptr_4
+    call void @print_i32(i32 %el_5)
+    %ptr_6 = getelementptr %Student, %Student* %st, i32 0, i32 1
+    %el_7 = load i1, i1* %ptr_6
+    call void @print_i1(i1 %el_7)
+    %ptr_8 = getelementptr %Student, %Student* %st, i32 0, i32 2
+    %el_9 = load float, float* %ptr_8
+    call void @print_float(float %el_9)
+    %ptr_10 = getelementptr %Student, %Student* %ret, i32 0, i32 0
+    %el_11 = load i32, i32* %ptr_10
+    call void @print_i32(i32 %el_11)
+    %ptr_12 = getelementptr %Student, %Student* %ret, i32 0, i32 1
+    %el_13 = load i1, i1* %ptr_12
+    call void @print_i1(i1 %el_13)
+    %ptr_14 = getelementptr %Student, %Student* %ret, i32 0, i32 2
+    %el_15 = load float, float* %ptr_14
+    call void @print_float(float %el_15)
     ret i32 0
 }

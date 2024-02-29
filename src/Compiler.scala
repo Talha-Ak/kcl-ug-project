@@ -25,7 +25,7 @@ object Compiler {
     @main
     def write() = {
         val externalFile = scala.io.Source
-            .fromResource("enumtest.txt")
+            .fromResource("typetest.txt")
             .mkString
         val ast = fastparse.parse(externalFile, All(_))
         val code = ast match {
@@ -86,8 +86,9 @@ define void @print_float(float %x) {
 
     // Another crime committed
     var program_envs: List[Env] = Nil
-    var program_types: Map[String, Type] = Map()
+    var program_structs: List[Struct] = Nil
     var program_funcs: List[CFunc] = Nil
+    var program_enums: Map[String, Type] = Map()
 
     extension (t: Type)
         def llvm: String = t match {
@@ -99,11 +100,9 @@ define void @print_float(float %x) {
             case EnvType(env) => s"%${env}_t*"
             case FnType(args, ret) => ret.llvm ++ " " ++ args.map(_.llvm).mkString("(", ", ", ")*")
             case UserType(name) => {
-                val cur_type = program_types.get(name)
-                cur_type match {
-                    case Some(t) => t.llvm
-                    case None => throw new Exception(s"Type $name not found in $program_types")
-                }
+                if program_enums.contains(name) then program_enums(name).llvm
+                else if program_structs.exists(_.name == name) then s"%$name*"
+                else throw new Exception(s"User type $t not found in $program_structs")
             }
         }
 
@@ -145,6 +144,7 @@ define void @print_float(float %x) {
         case KBool(b) => if b then "true" else "false"
         case KFloat(f) => "0x" + toHexString(doubleToLongBits(f))
         case KEnum(root, item) => s"$root::$item"
+        case KStructRef(st, age, t) => s"strct ref $st $age"
     }
 
     // compile K expressions
@@ -163,6 +163,13 @@ define void @print_float(float %x) {
     def compile_env_defs(envs: List[Env]) : String = envs.map {
         case Env(name, vals) => vals.map(_.get_type.llvm).mkString(s"%${name}_t = type { ", ", ", " }")
     }.mkString("", "\n", "\n\n")
+
+    def compile_struct_defs(struct: List[Struct]) : String = {
+        // creates a llvm struct (%name = type { i32, i32, i32 })
+        struct.map {
+            case Struct(name, items) => items.map(_._2.llvm).mkString(s"%$name = type { ", ", ", " }")
+        }.mkString("", "\n", "\n\n")
+    }
 
     def compile_env_store(x: String, env: Env) : String = {
         val Env(name, vals) = env
@@ -192,12 +199,35 @@ define void @print_float(float %x) {
         case _ => throw new Exception(s"Expected environment type, got ${ref.env}")
     }
 
+    def compile_struct_dec(x: String, struct: String, vals: Seq[KVal]) : String = {
+        i"%$x = alloca %$struct" ++
+        vals.zipWithIndex.map{ case (v, i) =>
+            val get_elem_ptr = i"%${x}_$i = getelementptr %$struct, %$struct* %$x, i32 0, i32 $i"
+            val store = i"store ${v.get_type.llvm} ${compile_val(v)}, ${v.get_type.llvm}* %${x}_$i"
+            get_elem_ptr ++ store
+        }.mkString
+    }
+
     def compile_return(v: KVal) : String = v match {
         case KVar(_, VoidType) => i"ret void"
         case v => i"ret ${v.get_type.llvm} ${compile_val(v)}"
     }
 
-    def compile_write(v: KVal) = i"call void @print_${v.get_type.llvm}(${v.get_type.llvm} ${compile_val(v)})"
+    def compile_write(v: KVal) = v match {
+        case KStructRef(name, item, UserType(t)) => 
+            // get el ptr to struct item based on program_structs
+            val struct = program_structs.find(_.name == t).get
+            val idx = struct.items.map(_._1).indexOf(item)
+            val ptr = Fresh("ptr")
+            val el = Fresh("el")
+            i"%$ptr = getelementptr %$t, %$t* %$name, i32 0, i32 $idx" ++
+            // load the value
+            i"%$el = load ${struct.items(idx)._2.llvm}, ${struct.items(idx)._2.llvm}* %$ptr" ++
+            // print the value
+            i"call void @print_${struct.items(idx)._2.llvm}(${struct.items(idx)._2.llvm} %$el)"
+        case _ =>
+            i"call void @print_${v.get_type.llvm}(${v.get_type.llvm} ${compile_val(v)})"
+    }
 
     def compile_anf(a: KAnf) : String = a match {
         case KReturn(v) => 
@@ -206,8 +236,13 @@ define void @print_float(float %x) {
             compile_env_store(x, env) ++ compile_anf(a)
         case KLetEnvRef(x, ref, a) =>
             compile_fn_ref(x, ref) ++ compile_anf(a)
+        case KStructDef(struct, a) =>
+            // already hoisted
+            compile_anf(a)
         case KWrite(v, a) =>
             compile_write(v) ++ compile_anf(a)
+        case KLet(x, KStructDec(struct, vals), a) =>
+            compile_struct_dec(x, struct, vals) ++ compile_anf(a)
         case KLet(x, e, a) => 
             i"%$x = ${compile_exp(e)}" ++ compile_anf(a)
         case KIf(x, e1, e2) => {
@@ -244,12 +279,13 @@ define void @print_float(float %x) {
         val (closure, _) = convert(ppcps)
         println(closure)
         println("################")
-        val (cfunc, anf, envs) = hoist(closure)
+        val (cfunc, anf, envs, structs) = hoist(closure)
         program_envs = envs
-        program_types = enums
+        program_structs = structs
+        program_enums = enums
         program_funcs = cfunc
         val full_program = cfunc :+ CFunc("main", Nil, IntType, anf)
-        val output = prelude + compile_env_defs(envs) + full_program.map(compile_cfunc).mkString("\n")
+        val output = prelude + compile_env_defs(envs) + compile_struct_defs(structs) + full_program.map(compile_cfunc).mkString("\n")
         output
     }
 }

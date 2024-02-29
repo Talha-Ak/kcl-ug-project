@@ -94,6 +94,9 @@ object PostProcess {
         case KCall(v, vrs) => 
             val vs = vrs.map(v => process_kval(v, en))
             KCall(v, vs)
+        case KStructDec(struct, vals) =>
+            val vs = vals.map(v => process_kval(v, en))
+            KStructDec(struct, vs)
         case Kop(o, v1, v2) => 
             Kop(o, process_kval(v1, en), process_kval(v2, en))
     }
@@ -107,6 +110,7 @@ object PostProcess {
         case KReturn(v) => KReturn(v)
         case KLetEnv(x, env, next) => KLetEnv(x, env, postprocess(next, enums))
         case KLetEnvRef(x, ref, next) => KLetEnvRef(x, ref, postprocess(next, enums))
+        case KStructDef(struct, next) => KStructDef(struct, postprocess(next, enums))
     }
     
 }
