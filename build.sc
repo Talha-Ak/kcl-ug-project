@@ -1,7 +1,7 @@
 import mill._, scalalib._
 
 object compiler extends RootModule with ScalaModule {
-    def scalaVersion = "3.2.2"
+    def scalaVersion = "3.4.0"
 
     def ivyDeps = Agg(
         ivy"com.lihaoyi::mainargs:0.5.4",
