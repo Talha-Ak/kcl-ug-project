@@ -7,55 +7,6 @@ import java.lang.Long.toHexString
 import java.lang.Double.doubleToLongBits
 
 object Compiler {
-    def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args)
-
-    @main
-    def print() = {
-        val externalFile = scala.io.Source
-            .fromResource("test2.txt")
-            .mkString
-        val ast = fastparse.parse(externalFile, All(_))
-        ast match {
-        //  case Parsed.Success(value, index) => {println(ast.get.value); println(compile_new(ast.get.value))}
-         case Parsed.Success(value, index) => {println(ast.get.value); println(compile_comb(ast.get.value))}
-         case Parsed.Failure(label, idx, extra) => println(extra.traced.trace)
-        }
-    }
-
-    @main
-    def write() = {
-        val externalFile = scala.io.Source
-            .fromResource("typetest.txt")
-            .mkString
-        val ast = fastparse.parse(externalFile, All(_))
-        val code = ast match {
-        //  case Parsed.Success(value, index) => {println(ast.get.value); println(compile_new(ast.get.value))}
-         case Parsed.Success(value, index) => {println(ast.get.value); compile_comb(ast.get.value)}
-         case Parsed.Failure(label, idx, extra) => println(extra.traced.trace); ""
-        }
-        val fname = "test.ll"
-        os.write.over(os.pwd / fname, code)
-    }
-
-    // @main
-    // def exec() = {
-    //     val externalFile = scala.io.Source
-    //         .fromResource("test2.txt")
-    //         .mkString
-    //     val ast = fastparse.parse(externalFile, All(_))
-    //     ast match {
-    //         case Parsed.Failure(label, idx, extra) => println(extra.traced.trace)
-    //      case Parsed.Success(value, index) => {
-    //         val fname = "test.fun"
-    //         val path = os.pwd / fname
-    //         val file = fname.stripSuffix("." ++ path.ext)
-    //         write()
-    //         os.proc("llc", "-filetype=obj", "--relocation-model=pic", file ++ ".ll").call()
-    //         os.proc("gcc", file ++ ".o", "-o", file ++ ".bin").call()
-    //         os.proc(os.pwd / (file ++ ".bin")).call(stdout = os.Inherit)
-    //      }
-    //     }
-    // }
 
     val prelude = """@.str = private constant [4 x i8] c"%d\0A\00"
 @.str.1 = private constant [4 x i8] c"%f\0A\00"
@@ -84,7 +35,8 @@ define void @print_float(float %x) {
 ; <===== Generated code starts here =====>
 """
 
-    // Another crime committed
+    // var crimes committed here
+    // holds global constructs that can be referred to
     var program_envs: List[Env] = Nil
     var program_structs: List[Struct] = Nil
     var program_funcs: List[CFunc] = Nil
@@ -99,6 +51,7 @@ define void @print_float(float %x) {
             case FloatType => "float"
             case EnvType(env) => s"%${env}_t*"
             case FnType(args, ret) => ret.llvm ++ " " ++ args.map(_.llvm).mkString("(", ", ", ")*")
+            // UserTypes can either be an Enum reference or a Struct reference
             case UserType(name) => {
                 if program_enums.contains(name) then program_enums(name).llvm
                 else if program_structs.exists(_.name == name) then s"%$name*"
@@ -113,11 +66,9 @@ define void @print_float(float %x) {
         def c(args: Any*): String = "@" ++ sc.s(args:_*) ++ "\n"
     }
 
-
-
     // mathematical and boolean operations
-    // TODO: replace missing for float
     def compile_op(op: String, t: Type) = {
+        // Adjust op prefix if a float operation.
         val p = if t == FloatType then "f" else ""
         val q = if t == FloatType then "f" else "s"
         val r = if t == FloatType then "f" else "i"
@@ -143,8 +94,7 @@ define void @print_float(float %x) {
         case KNum(i) => i.toString
         case KBool(b) => if b then "true" else "false"
         case KFloat(f) => "0x" + toHexString(doubleToLongBits(f))
-        case KEnum(root, item) => s"$root::$item"
-        case KStructRef(st, age, t) => s"strct ref $st $age"
+        case KEnum(root, item) => throw new Exception("Enums should have been converted to ints by now.")
     }
 
     // compile K expressions
@@ -171,19 +121,6 @@ define void @print_float(float %x) {
         }.mkString("", "\n", "\n\n")
     }
 
-    def compile_env_store(x: String, env: Env) : String = {
-        val Env(name, vals) = env
-        i"%$x = alloca %${name}_t" ++
-        vals.zipWithIndex.map{ case (v, i) =>
-            val get_elem_ptr = i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i"
-            val store = v match {
-                case KVar(s, t: FnType) => i"store ${t.llvm} @$s, ${t.llvm}* %$x$i"
-                case v => i"store ${v.get_type.llvm} ${compile_val(v)}, ${v.get_type.llvm}* %$x$i"
-            }
-            get_elem_ptr ++ store
-        }.mkString
-    }
-    
     def compile_fn_ref(x: String, ref: Ref) : String = ref.env match {
         case KVar(_, t: EnvType) => {
             val actual_name = t.env
@@ -199,50 +136,53 @@ define void @print_float(float %x) {
         case _ => throw new Exception(s"Expected environment type, got ${ref.env}")
     }
 
-    def compile_struct_dec(x: String, struct: String, vals: Seq[KVal]) : String = {
-        i"%$x = alloca %$struct" ++
-        vals.zipWithIndex.map{ case (v, i) =>
-            val get_elem_ptr = i"%${x}_$i = getelementptr %$struct, %$struct* %$x, i32 0, i32 $i"
-            val store = i"store ${v.get_type.llvm} ${compile_val(v)}, ${v.get_type.llvm}* %${x}_$i"
-            get_elem_ptr ++ store
-        }.mkString
-    }
-
     def compile_return(v: KVal) : String = v match {
         case KVar(_, VoidType) => i"ret void"
         case v => i"ret ${v.get_type.llvm} ${compile_val(v)}"
     }
 
-    def compile_write(v: KVal) = v match {
-        case KStructRef(name, item, UserType(t)) => 
-            // get el ptr to struct item based on program_structs
-            val struct = program_structs.find(_.name == t).get
-            val idx = struct.items.map(_._1).indexOf(item)
-            val ptr = Fresh("ptr")
-            val el = Fresh("el")
-            i"%$ptr = getelementptr %$t, %$t* %$name, i32 0, i32 $idx" ++
-            // load the value
-            i"%$el = load ${struct.items(idx)._2.llvm}, ${struct.items(idx)._2.llvm}* %$ptr" ++
-            // print the value
-            i"call void @print_${struct.items(idx)._2.llvm}(${struct.items(idx)._2.llvm} %$el)"
-        case _ =>
-            i"call void @print_${v.get_type.llvm}(${v.get_type.llvm} ${compile_val(v)})"
-    }
-
     def compile_anf(a: KAnf) : String = a match {
         case KReturn(v) => 
             compile_return(v)
-        case KLetEnv(x, env, a) =>
-            compile_env_store(x, env) ++ compile_anf(a)
+        case KLetEnv(x, Env(name, vals), a) => {
+            val alloc = i"%$x = alloca %${name}_t"
+            val assign = vals.zipWithIndex.map{ case (v, i) =>
+                val get_elem_ptr = i"%$x$i = getelementptr %${name}_t, %${name}_t* %$x, i32 0, i32 $i"
+                val store = v match {
+                    case KVar(s, t: FnType) => i"store ${t.llvm} @$s, ${t.llvm}* %$x$i"
+                    case v => i"store ${v.get_type.llvm} ${compile_val(v)}, ${v.get_type.llvm}* %$x$i"
+                }
+                get_elem_ptr ++ store
+            }.mkString
+            alloc ++ assign ++ compile_anf(a)
+        }
         case KLetEnvRef(x, ref, a) =>
             compile_fn_ref(x, ref) ++ compile_anf(a)
         case KStructDef(struct, a) =>
             // already hoisted
             compile_anf(a)
-        case KWrite(v, a) =>
-            compile_write(v) ++ compile_anf(a)
-        case KLet(x, KStructDec(struct, vals), a) =>
-            compile_struct_dec(x, struct, vals) ++ compile_anf(a)
+        case KStructRef(x, name, item, UserType(t), a) => {
+            val struct = program_structs.find(_.name == t).get
+            val idx = struct.items.indexWhere(_._1 == item)
+
+            val ptr = Fresh("ptr")
+            val get_elem_ptr = i"%$ptr = getelementptr %$t, %$t* %$name, i32 0, i32 $idx"
+            val load = i"%$x = load ${struct.items(idx)._2.llvm}, ${struct.items(idx)._2.llvm}* %$ptr"
+            get_elem_ptr ++ load ++ compile_anf(a)
+        }
+        case KWrite(v, a) => {
+            val write = i"call void @print_${v.get_type.llvm}(${v.get_type.llvm} ${compile_val(v)})"
+            write ++ compile_anf(a)
+        }
+        case KLet(x, KStructDec(struct, vals), a) => {
+            val alloc = i"%$x = alloca %$struct"
+            val assign = vals.zipWithIndex.map{ case (v, i) =>
+                val get_elem_ptr = i"%${x}_$i = getelementptr %$struct, %$struct* %$x, i32 0, i32 $i"
+                val store = i"store ${v.get_type.llvm} ${compile_val(v)}, ${v.get_type.llvm}* %${x}_$i"
+                get_elem_ptr ++ store
+            }.mkString
+            alloc ++ assign ++ compile_anf(a)
+        }
         case KLet(x, e, a) => 
             i"%$x = ${compile_exp(e)}" ++ compile_anf(a)
         case KIf(x, e1, e2) => {
@@ -261,14 +201,13 @@ define void @print_float(float %x) {
     def compile_cfunc(f: CFunc) : String = {
         val CFunc(name, args, ret, body) = f
         // Assuming the first arg is the environment
-        val arglist = if args.isEmpty
-            then ""
+        val arglist = if args.isEmpty then ""
             else args.map{case ((s, t)) => s"${t.llvm} %$s"}.mkString(", ")
         val body2 = compile_anf(body)
         m"define ${ret.llvm} @$name ($arglist) {" ++ body2 ++ m"}"
     }
 
-    def compile_comb(prog: Exp) : String = {
+    def compile(prog: Exp) : String = {
         val (enums, no_enums) = PreProcess.preprocess(prog)
         val cps = CPSi(no_enums)
         println(cps)
@@ -288,4 +227,54 @@ define void @print_float(float %x) {
         val output = prelude + compile_env_defs(envs) + compile_struct_defs(structs) + full_program.map(compile_cfunc).mkString("\n")
         output
     }
+
+    def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args)
+
+    @main
+    def print() = {
+        val externalFile = scala.io.Source
+            .fromResource("test2.txt")
+            .mkString
+        val ast = fastparse.parse(externalFile, All(_))
+        ast match {
+        //  case Parsed.Success(value, index) => {println(ast.get.value); println(compile_new(ast.get.value))}
+         case Parsed.Success(value, index) => {println(ast.get.value); println(compile(ast.get.value))}
+         case Parsed.Failure(label, idx, extra) => println(extra.traced.trace)
+        }
+    }
+
+    @main
+    def write() = {
+        val externalFile = scala.io.Source
+            .fromResource("bench.txt")
+            .mkString
+        val ast = fastparse.parse(externalFile, All(_))
+        val code = ast match {
+        //  case Parsed.Success(value, index) => {println(ast.get.value); println(compile_new(ast.get.value))}
+         case Parsed.Success(value, index) => {println(ast.get.value); compile(ast.get.value)}
+         case Parsed.Failure(label, idx, extra) => println(extra.traced.trace); ""
+        }
+        val fname = "test.ll"
+        os.write.over(os.pwd / fname, code)
+    }
+
+    // @main
+    // def exec() = {
+    //     val externalFile = scala.io.Source
+    //         .fromResource("test2.txt")
+    //         .mkString
+    //     val ast = fastparse.parse(externalFile, All(_))
+    //     ast match {
+    //         case Parsed.Failure(label, idx, extra) => println(extra.traced.trace)
+    //      case Parsed.Success(value, index) => {
+    //         val fname = "test.fun"
+    //         val path = os.pwd / fname
+    //         val file = fname.stripSuffix("." ++ path.ext)
+    //         write()
+    //         os.proc("llc", "-filetype=obj", "--relocation-model=pic", file ++ ".ll").call()
+    //         os.proc("gcc", file ++ ".o", "-o", file ++ ".bin").call()
+    //         os.proc(os.pwd / (file ++ ".bin")).call(stdout = os.Inherit)
+    //      }
+    //     }
+    // }
 }

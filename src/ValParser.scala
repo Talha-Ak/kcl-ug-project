@@ -53,7 +53,7 @@ object ValParser {
         P(CharsWhileIn("0-9", 1) ~ "." ~ CharsWhileIn("0-9", 1)).!.map(_.toDouble)
 
     def IdParser[$: P] =
-        P(!StringIn("if", "then", "else", "print", "def", "val", "true", "false") ~ CharIn("A-Za-z_") ~~ CharsWhileIn("A-Za-z0-9_", 0)).!
+        P(!StringIn("if", "then", "else", "print", "def", "val", "enum", "struct", "true", "false") ~ CharIn("A-Za-z_") ~~ CharsWhileIn("A-Za-z0-9_", 0)).!
         
     def EnumRefParser[$: P] =
         P(IdParser.! ~~ "::" ~~ IdParser.!)
@@ -104,7 +104,6 @@ object ValParser {
     def Term[$: P]: P[Exp] = P(Fact ~ (CharIn("+\\-").! ~ Fact).rep(0)).map(leftAssociate(_,_)).log
     def Fact[$: P]: P[Exp] = P(Primary ~ (CharIn("/*%").! ~ Primary).rep(0)).map(leftAssociate(_,_))
     def Primary[$: P]: P[Exp] = P(
-        ("print" ~ "(" ~ Exp ~ ")").map(Write) |
         (IdParser ~ "(" ~ Exp.rep(0, ",") ~ ")").map(Call) |
         ("(" ~ Exp ~ ")") |
         EnumRefParser.map(EnumRef) |

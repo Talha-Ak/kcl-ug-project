@@ -43,7 +43,7 @@ object ClosureConv {
         case KFun(fnName, args, ret, body, in) => {
             val fvs = free_anf(body).filterNot(x => args.map(_._1).contains(x.s)).toList
             println(s"The free variables in $fnName are $fvs")
-            
+
             if fvs.isEmpty then {
                 glob_fns += fnName
                 val (body2, env) = convert(body)
@@ -63,9 +63,9 @@ object ClosureConv {
                 val newRet = if next_env.isEmpty then ret else EnvType(next_env.get.name)
                 val newType = FnType(newArgs.map(_._2), newRet)
                 val env = Env(envId, KVar(fnName, newType) :: fvs)
-                
+ 
                 // For each free variable, add a line that extracts it from the environment
-                val (body2, _) = fvs.zipWithIndex.foldLeft(converted_body, 1) { // missing nested envs
+                val (body2, _) = fvs.zipWithIndex.foldLeft(converted_body, 1) {
                     // LET x = env[i] IN anf
                     case ((next, i), (ssaVar, _)) => (KLetEnvRef(ssaVar.s, Ref(KVar(envId, EnvType(envId)), i), next), i + 1)
                 }

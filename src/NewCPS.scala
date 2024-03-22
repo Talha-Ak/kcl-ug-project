@@ -30,8 +30,8 @@ object NewCPS {
     case class KEnum(root: String, item: String) extends KVal:
         override def get_type = IntType
 
-    case class KStructRef(name: String, item: String, t: Type = Missing) extends KVal:
-        override def get_type = t
+    //case class KStructRef(name: String, item: String, t: Type = Missing) extends KVal:
+    //   override def get_type = t
     
     sealed trait KExp
     case class Kop(o: String, v1: KVal, v2: KVal) extends KExp
@@ -73,6 +73,8 @@ object NewCPS {
     case class Struct(name: String, items: Seq[(String, Type)])
     case class KStructDef(struct: Struct, in: KAnf) extends KAnf:
         override def toString = s"STRUCT ${struct.name} = { \n${struct.items.map{case (x, t) => s"$x: $t"}.mkString("\n")} \n} \n$in"
+    case class KStructRef(x: String, name: String, item: String, t: Type, next: KAnf) extends KAnf:
+        override def toString = s"LET ${x}: $t =  ${name}.$item \n$next"
 
     type TypeEnv = Map[String, Type]
 
@@ -84,7 +86,14 @@ object NewCPS {
         case Bool(b) => k(KBool(b), ty)
         case Flt(f) => k(KFloat(f), ty)
         case EnumRef(root, item) => k(KEnum(root, item), ty)
-        case StructRef(root, items) => k(KStructRef(root, items, ty(root)), ty)
+        case StructRef(name, item) =>
+            ty(name) match {
+                case UserType(t) =>
+                    val z = Fresh("tmp")
+                    // get the type of the item 
+                    KStructRef(z, name, item, ty(name), k(KVar(z, ty(s"$t.$item")), ty))
+                case _ => throw new Exception(s"Expected user type for $name, got ${ty(name)}")
+            }
         case Op(e1, o, e2) => {
             val z = Fresh("tmp")
             CPS(e1, ty)((y1, t1) => 
@@ -103,9 +112,9 @@ object NewCPS {
                     val z = Fresh("tmp")
                     val fn_call = KVar(name, ty(name))
                     ty(name) match {
-                        case _: FnType => KLet(z, KCall(fn_call, vs), k(KVar(z, ty(name)), ty))
-                        case _: UserType => KLet(z, KStructDec(name, vs), k(KVar(z, ty(name)), ty))
-                        case _ => throw new Exception(s"Expected function type for $name, got ${ty(name)}")
+                        case t: FnType => KLet(z, KCall(KVar(name, t), vs), k(KVar(z, t.ret), ty))
+                        case t: UserType => KLet(z, KStructDec(name, vs), k(KVar(z, ty(name)), ty))
+                        case t => throw new Exception(s"Expected function type for $name, got ${ty(name)}")
                     }
                 }
                 case e::es => CPS(e, ty)((y, t1) => aux(es, vs ::: List(y), t1))
@@ -123,7 +132,9 @@ object NewCPS {
             val updated_ty = ty ++ args.map{case (x, t) => (x, t)} + (name -> FnType(args.map(_._2).toList, ret))
             KFun(name, args, ret, CPS(body, updated_ty)((y, _) => KReturn(y)), k(KVar(name), ty + (name -> FnType(args.map(_._2).toList, ret))))
         case StructDef(name, items) =>
-            KStructDef(Struct(name, items), k(KVar(name), ty + (name -> UserType(name))))
+            // update the ty with struct type, as well as items inside the struct
+            val updated_ty = ty + (name -> UserType(name)) ++ items.map{case (x, t) => (s"$name.$x", t)}
+            KStructDef(Struct(name, items), k(KVar(name), updated_ty))
         case Main(e) => CPS(e, ty)((y, _) => KReturn(y))
     }   
 

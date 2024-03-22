@@ -111,6 +111,7 @@ object PostProcess {
         case KLetEnv(x, env, next) => KLetEnv(x, env, postprocess(next, enums))
         case KLetEnvRef(x, ref, next) => KLetEnvRef(x, ref, postprocess(next, enums))
         case KStructDef(struct, next) => KStructDef(struct, postprocess(next, enums))
+        case KStructRef(x, name, item, t, next) => KStructRef(x, name, item, t, postprocess(next, enums))
     }
     
 }

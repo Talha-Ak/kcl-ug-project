@@ -11,7 +11,6 @@ def something(x: Int): Student = {
 def main() = {
   val st: Student = Student(20, false, 89.0);
   val ret: Student = something(20);
-  print(0);
   print(st.age);
   print(st.part_time);
   print(st.avg_grade);
