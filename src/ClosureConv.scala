@@ -1,5 +1,4 @@
 package compiler
-import NewCPS._
 import ValParser.{Type, FnType, EnvType}
 import compiler.ValParser.Missing
 import compiler.ValParser.VoidType
@@ -9,11 +8,11 @@ import compiler.ValParser.FloatType
 import compiler.ValParser.UserType
 import compiler.ValParser.EnumType
 
-object ClosureConv {
+case class CFunc(fname: String, args: Seq[(String, Type)], ret: Type, body: KAnf) {
+    override def toString = s"fun $fname($args):\n$body\nEND"
+}
 
-    case class CFunc(fname: String, args: Seq[(String, Type)], ret: Type, body: KAnf) {
-        override def toString = s"fun $fname($args):\n$body\nEND"
-    }
+class ClosureConv(counter: Counter) {
 
     def free_val(v: KVal): Set[KVar] = v match {
         case k: KVar => Set(k)
@@ -58,7 +57,7 @@ object ClosureConv {
             } else {
                 val (converted_body, next_env) = convert(body)
 
-                val envId = Fresh("env")
+                val envId = counter.Fresh("env")
                 val newArgs = (envId, EnvType(envId)) +: args
                 val newRet = if next_env.isEmpty then ret else EnvType(next_env.get.name)
                 val newType = FnType(newArgs.map(_._2), newRet)
@@ -102,15 +101,15 @@ object ClosureConv {
         case KFun(fnName, args, ret, body, next) => {
             val (fns, e, envs, structs) = hoist(body)
             val (fns2, e2, envs2, structs2) = hoist(next)
-            val entry = Fresh("entry")
+            val entry = counter.Fresh("entry")
             val fn = CFunc(fnName, args, ret, e)
             (fn :: fns ::: fns2, e2, envs ::: envs2, structs ::: structs2)
         }
         case KIf(x1, e1, e2) => {
             val (fns, t, envs, structs) = hoist(e1)
             val (fns2, f, envs2, structs2) = hoist(e2)
-            val thn = Fresh("then")
-            val els = Fresh("else")
+            val thn = counter.Fresh("then")
+            val els = counter.Fresh("else")
             (fns ::: fns2, KIf(x1, t, f), envs ::: envs2, structs ::: structs2)
         }
         case KLetEnv(x, env: Env, next) => {
@@ -156,7 +155,7 @@ object ClosureConv {
                                 val (uv, t2) = update_val_types(v, t)
                                 (vs :+ uv, t2)
                         }
-                        val ptr = Fresh("ptr")
+                        val ptr = counter.Fresh("ptr")
                         val env_fn = KVar(o.s, call_ty)
                         KLetEnvRef(ptr, Ref(env_fn, 0), KLet(x, KCall(KVar(ptr, o.t), env_fn +: updated_vals), update_types(e2, updated_vals_ty + (x -> EnvType(env)))))
                     }

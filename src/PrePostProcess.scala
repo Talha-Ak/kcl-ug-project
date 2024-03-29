@@ -1,6 +1,5 @@
 package compiler
 import ValParser._
-import NewCPS._
 
 // Functions containing pre-process steps before ANF conversion.
 object PreProcess {

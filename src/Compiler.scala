@@ -1,12 +1,14 @@
 package compiler
 import mainargs.{main, ParserForMethods}
 import os._
-import ValParser._, NewCPS._, ClosureConv._
+import ValParser._
 import fastparse.{parse, Parsed}
 import java.lang.Long.toHexString
 import java.lang.Double.doubleToLongBits
 
 object Compiler {
+    val CPS = NewCPS(Labels)
+    val Closure = ClosureConv(Labels)
 
     val prelude = """@.str = private constant [4 x i8] c"%d\0A\00"
 @.str.1 = private constant [4 x i8] c"%f\0A\00"
@@ -125,7 +127,7 @@ define void @print_float(float %x) {
         case KVar(_, t: EnvType) => {
             val actual_name = t.env
             val env = program_envs.find(_.name == actual_name).get
-            val ptr = Fresh("ptr")
+            val ptr = Labels.Fresh("ptr")
             i"%$ptr = getelementptr %${env.name}_t, %${env.name}_t* %${ref.env.s}, i32 0, i32 ${ref.idx}" ++
             i"%$x = load ${env.vals(ref.idx).get_type.llvm}, ${env.vals(ref.idx).get_type.llvm}* %$ptr"
         }
@@ -165,7 +167,7 @@ define void @print_float(float %x) {
             val struct = program_structs.find(_.name == t).get
             val idx = struct.items.indexWhere(_._1 == item)
 
-            val ptr = Fresh("ptr")
+            val ptr = Labels.Fresh("ptr")
             val get_elem_ptr = i"%$ptr = getelementptr %$t, %$t* %$name, i32 0, i32 $idx"
             val load = i"%$x = load ${struct.items(idx)._2.llvm}, ${struct.items(idx)._2.llvm}* %$ptr"
             get_elem_ptr ++ load ++ compile_anf(a)
@@ -186,8 +188,8 @@ define void @print_float(float %x) {
         case KLet(x, e, a) => 
             i"%$x = ${compile_exp(e)}" ++ compile_anf(a)
         case KIf(x, e1, e2) => {
-            val if_br = Fresh("if_branch")
-            val else_br = Fresh("else_branch")
+            val if_br = Labels.Fresh("if_branch")
+            val else_br = Labels.Fresh("else_branch")
             i"br i1 %$x, label %$if_br, label %$else_br" ++
             l"\n$if_br" ++
             compile_anf(e1) ++
@@ -209,16 +211,16 @@ define void @print_float(float %x) {
 
     def compile(prog: Exp) : String = {
         val (enums, no_enums) = PreProcess.preprocess(prog)
-        val cps = CPSi(no_enums)
-        println(cps)
-        println("################")
+        val cps = CPS.CPSi(no_enums)
+        // println(cps)
+        // println("################")
         val ppcps = PostProcess.postprocess(cps, enums)
-        println(ppcps)
-        println("################11")
-        val (closure, _) = convert(ppcps)
-        println(closure)
-        println("################")
-        val (cfunc, anf, envs, structs) = hoist(closure)
+        // println(ppcps)
+        // println("################11")
+        val (closure, _) = Closure.convert(ppcps)
+        // println(closure)
+        // println("################")
+        val (cfunc, anf, envs, structs) = Closure.hoist(closure)
         program_envs = envs
         program_structs = structs
         program_enums = enums
@@ -231,27 +233,25 @@ define void @print_float(float %x) {
     def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args)
 
     @main
-    def print() = {
+    def print(filename: String) = {
         val externalFile = scala.io.Source
-            .fromResource("test2.txt")
+            .fromResource(s"$filename.txt")
             .mkString
         val ast = fastparse.parse(externalFile, All(_))
         ast match {
-        //  case Parsed.Success(value, index) => {println(ast.get.value); println(compile_new(ast.get.value))}
-         case Parsed.Success(value, index) => {println(ast.get.value); println(compile(ast.get.value))}
+         case Parsed.Success(value, index) => println(compile(ast.get.value))
          case Parsed.Failure(label, idx, extra) => println(extra.traced.trace)
         }
     }
 
     @main
-    def write() = {
+    def write(filename: String) = {
         val externalFile = scala.io.Source
-            .fromResource("bench.txt")
+            .fromResource(s"$filename.txt")
             .mkString
         val ast = fastparse.parse(externalFile, All(_))
         val code = ast match {
-        //  case Parsed.Success(value, index) => {println(ast.get.value); println(compile_new(ast.get.value))}
-         case Parsed.Success(value, index) => {println(ast.get.value); compile(ast.get.value)}
+         case Parsed.Success(value, index) => compile(ast.get.value)
          case Parsed.Failure(label, idx, extra) => println(extra.traced.trace); ""
         }
         val fname = "test.ll"
