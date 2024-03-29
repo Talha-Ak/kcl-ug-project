@@ -1,7 +1,5 @@
 package compiler
 import fastparse._, ScalaWhitespace._
-import compiler.NewCPS.Env
-import scala.util.matching.Regex.Match
 
 object ValParser {
 
@@ -74,19 +72,19 @@ object ValParser {
     // Expressions
     //===============
     def Exp[$: P]: P[Exp] = P(
-        ("if" ~/ Equal ~ "then" ~ Exp ~ ("else" ~ Exp).?).map(If).log("if") |
-        ("print" ~ "(" ~ Exp ~ ")").map(Write).log("write") |
+        ("if" ~/ Equal ~ "then" ~ Exp ~ ("else" ~ Exp).?).map(If)|
+        ("print" ~ "(" ~ Exp ~ ")").map(Write)|
         Match |
         Block |
         Equal
     )
 
     def Block[$: P]: P[Exp] = P(
-        ("{" ~/ (DefFn | DefVal).rep ~ Exp.rep(1, ";") ~ "}").map((a, b) => (a ++ b).reduceRight(Sequence)).log
+        ("{" ~/ (DefFn | DefVal).rep ~ Exp.rep(1, ";") ~ "}").map((a, b) => (a ++ b).reduceRight(Sequence))
     )
 
     def Match[$: P]: P[Exp] = P(
-        (IdParser ~ "match" ~/ "{" ~ Case.rep(1) ~ "}").map(Match).log("match")
+        (IdParser ~ "match" ~/ "{" ~ Case.rep(1) ~ "}").map(Match)
     )
 
     def Case[$: P]: P[MCase] = P(
@@ -101,7 +99,7 @@ object ValParser {
 
     def Equal[$: P]: P[Exp] = P(Comp ~ (StringIn("==", "!=").! ~ Comp).rep(0)).map(leftAssociate(_,_))
     def Comp[$: P]: P[Exp] = P(Term ~ (StringIn(">", ">=", "<", "<=").! ~ Term).rep(0)).map(leftAssociate(_,_))
-    def Term[$: P]: P[Exp] = P(Fact ~ (CharIn("+\\-").! ~ Fact).rep(0)).map(leftAssociate(_,_)).log
+    def Term[$: P]: P[Exp] = P(Fact ~ (CharIn("+\\-").! ~ Fact).rep(0)).map(leftAssociate(_,_))
     def Fact[$: P]: P[Exp] = P(Primary ~ (CharIn("/*%").! ~ Primary).rep(0)).map(leftAssociate(_,_))
     def Primary[$: P]: P[Exp] = P(
         (IdParser ~ "(" ~ Exp.rep(0, ",") ~ ")").map(Call) |
@@ -115,21 +113,16 @@ object ValParser {
     )
 
     def DefFn[$: P]: P[Exp] =
-        P("def" ~/ IdParser ~ "(" ~ TypedIdParser.rep(0, ",") ~ ")" ~ ":" ~ TypeParser ~ "=" ~/ Exp ~ ";").map(Func).log
+        P("def" ~/ IdParser ~ "(" ~ TypedIdParser.rep(0, ",") ~ ")" ~ ":" ~ TypeParser ~ "=" ~/ Exp ~/ ";").map(Func)
     def DefVal[$: P]: P[Exp] =
-        P("val" ~/ TypedIdParser ~ "=" ~/ Exp ~ ";").map(Const).log
+        P("val" ~/ TypedIdParser ~ "=" ~/ Exp ~/ ";").map(Const)
     def DefEnum[$: P]: P[Exp] =
-        P("enum" ~/ IdParser ~ "=" ~ IdParser.rep(1, "|") ~ ";").map(EnumDef).log
+        P("enum" ~/ IdParser ~ "=" ~ IdParser.rep(1, "|") ~/ ";").map(EnumDef)
     def DefStruct[$: P]: P[Exp] =
-        P("struct" ~/ IdParser ~ "=" ~ "{" ~ TypedIdParser.rep(1, ",") ~ "}" ~ ";").map(StructDef).log
-
-    // def Prog[$: P]: P[List[Exp]] = P(
-    //     ("def" ~ "main" ~ "(" ~ ")" ~ "=" ~/ Exp).map(s => List(Main(s))).log |
-    //     (DefFn ~/ Prog).map((a, b) => a::b)
-    // )
+        P("struct" ~/ IdParser ~ "=" ~ "{" ~ TypedIdParser.rep(1, ",") ~ "}" ~/ ";").map(StructDef)
 
     def Prog[$: P]: P[Exp] = P(
-        ("def" ~ "main" ~ "(" ~ ")" ~ "=" ~/ Exp).map(s => s).log |
+        ("def" ~ "main" ~/ "(" ~/ ")" ~/ "=" ~/ Exp).map(s => s)|
         (DefFn ~/ Prog).map((a, b) => Sequence(a, b)) |
         (DefEnum ~/ Prog).map((a, b) => Sequence(a, b)) |
         (DefStruct ~/ Prog).map((a, b) => Sequence(a, b))

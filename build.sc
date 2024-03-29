@@ -10,7 +10,7 @@ object compiler extends RootModule with ScalaModule {
     )
 
     object test extends ScalaTests {
-        def ivyDeps = Agg(ivy"org.scalatest::scalatest:3.2.17")
+        def ivyDeps = Agg(ivy"org.scalatest::scalatest:3.2.18")
         def testFramework = "org.scalatest.tools.Framework"
     }
 }
