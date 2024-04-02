@@ -31,6 +31,7 @@ class ClosureConv(counter: Counter) {
         case KIf(x, e1, e2) => free_anf(e1) ++ free_anf(e2)
         case KFun(fnName, args, _, body, in) => (free_anf(body) ++ free_anf(in)).filterNot(x => args.map(_._1).contains(x.s) || x.s == fnName)
         case KStructDef(_, in) => free_anf(in)
+        case KStructRef(x, _, _, _, in) => free_anf(in).filterNot(_.s == x)
         case KWrite(v, in) => free_val(v) ++ free_anf(in)
         case KReturn(v) => free_val(v)
     }

@@ -71,21 +71,23 @@ define void @print_float(float %x) {
     // mathematical and boolean operations
     def compile_op(op: String, t: Type) = {
         // Adjust op prefix if a float operation.
-        val p = if t == FloatType then "f" else ""
-        val q = if t == FloatType then "f" else "s"
-        val r = if t == FloatType then "f" else "i"
+        val i = if t == FloatType then "f" else ""
+        val s = if t == FloatType then "f" else "s"
+        val cmp = if t == FloatType then "fcmp" else "icmp"
+        val n = if t == FloatType then "o" else ""
+        val o = if t == FloatType then "o" else "s"
             op match {
-                case "+" => s"${p}add ${t.llvm}"
-                case "*" => s"${p}mul ${t.llvm}"
-                case "-" => s"${p}sub ${t.llvm}"
-                case "/" => s"${q}div ${t.llvm}"
-                case "%" => s"${q}rem ${t.llvm}"
-                case "==" => s"${r}cmp eq ${t.llvm}"
-                case "!=" => s"${r}cmp ne ${t.llvm}"
-                case "<=" => s"${r}cmp sle ${t.llvm}"
-                case "<"  => s"${r}cmp slt ${t.llvm}"
-                case ">=" => s"${r}cmp sge ${t.llvm}"
-                case ">"  => s"${r}cmp sgt ${t.llvm}"
+                case "+" => s"${i}add ${t.llvm}"
+                case "*" => s"${i}mul ${t.llvm}"
+                case "-" => s"${i}sub ${t.llvm}"
+                case "/" => s"${s}div ${t.llvm}"
+                case "%" => s"${s}rem ${t.llvm}"
+                case "==" => s"$cmp ${n}eq ${t.llvm}"
+                case "!=" => s"$cmp ${n}ne ${t.llvm}"
+                case "<=" => s"$cmp ${o}le ${t.llvm}"
+                case "<"  => s"$cmp ${o}lt ${t.llvm}"
+                case ">=" => s"$cmp ${o}ge ${t.llvm}"
+                case ">"  => s"$cmp ${o}gt ${t.llvm}"
         }
     }
 
