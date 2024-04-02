@@ -31,12 +31,20 @@ Where `<args>` are the arguments to pass to the compiler. Available args are:
 - `print --filename <filename>`: Print the LLVM IR of the program in the file `<filename>`
 - `write --filename <filename>`: Write the LLVM IR of the program in the file `<filename>` to a file `test.ll`
 
+The filename refers to the available test programs in the `resources` directory.
+
 Alternatively, you can compile the project into a jar file and run it using the following commands:
 
 ```bash
 ./mill assembly
 cd out/assembly.dest
 java -jar out.jar <args>
+```
+
+Executing the `.ll` file using the LLVM interpreter can be done using the following command:
+
+```bash
+lli test.ll
 ```
 
 ## Testing
