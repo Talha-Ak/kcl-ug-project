@@ -7,7 +7,7 @@ object compiler extends RootModule with ScoverageModule {
     def scoverageVersion = "2.1.0"
 
     def ivyDeps = Agg(
-        ivy"com.lihaoyi::mainargs:0.5.4",
+        ivy"com.lihaoyi::mainargs:0.6.2",
         ivy"com.lihaoyi::fastparse:3.0.2",
         ivy"com.lihaoyi::os-lib:0.9.2"
     )

@@ -5,6 +5,7 @@ import ValParser._
 import fastparse.{parse, Parsed}
 import java.lang.Long.toHexString
 import java.lang.Double.doubleToLongBits
+import mainargs.arg
 
 object Compiler {
     val CPS = NewCPS(Labels)
@@ -211,17 +212,18 @@ define void @print_float(float %x) {
         m"define ${ret.llvm} @$name ($arglist) {" ++ body2 ++ m"}"
     }
 
-    def compile(prog: Exp) : String = {
+    def parse(filename: String) : Parsed[Exp] = {
+        val externalFile = scala.io.Source
+            .fromResource(s"$filename.txt")
+            .mkString
+        fastparse.parse(externalFile, All(_))
+    }
+
+    def compile_ast(prog: Exp) : String = {
         val (enums, no_enums) = PreProcess.preprocess(prog)
         val cps = CPS.CPSi(no_enums)
-        // println(cps)
-        // println("################")
         val ppcps = PostProcess.postprocess(cps, enums)
-        // println(ppcps)
-        // println("################11")
         val (closure, _) = Closure.convert(ppcps)
-        // println(closure)
-        // println("################")
         val (cfunc, anf, envs, structs) = Closure.hoist(closure)
         program_envs = envs
         program_structs = structs
@@ -232,51 +234,59 @@ define void @print_float(float %x) {
         output
     }
 
-    def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args)
+    def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args, allowPositional = true)
 
     @main
-    def print(filename: String) = {
-        val externalFile = scala.io.Source
-            .fromResource(s"$filename.txt")
-            .mkString
-        val ast = fastparse.parse(externalFile, All(_))
+    def print(@arg(short = 'i', doc = "Input file name")
+              input: String) = {
+        val ast = parse(input)
         ast match {
-         case Parsed.Success(value, index) => println(compile(ast.get.value))
-         case Parsed.Failure(label, idx, extra) => println(extra.traced.trace)
+            case Parsed.Failure(label, idx, extra) => println(extra.traced.trace)
+            case Parsed.Success(value, index) => println(compile_ast(ast.get.value))
         }
     }
 
     @main
-    def write(filename: String) = {
-        val externalFile = scala.io.Source
-            .fromResource(s"$filename.txt")
-            .mkString
-        val ast = fastparse.parse(externalFile, All(_))
-        val code = ast match {
-         case Parsed.Success(value, index) => compile(ast.get.value)
-         case Parsed.Failure(label, idx, extra) => println(extra.traced.trace); ""
+    def write(@arg(short = 'i', doc = "Input file name")
+              input: String,
+              @arg(short = 'o', doc = "Output file name")
+              output: Option[String]) = {
+        println(s"Parsing $input.txt...")
+        val ast = parse(input)
+        ast match {
+            case Parsed.Failure(label, idx, extra) => println(extra.traced.trace);
+            case Parsed.Success(value, index) => {
+                println("Compiling to LLVM...")
+                val code = compile_ast(ast.get.value)
+                val fname = output.getOrElse("test") + ".ll"
+                os.write.over(os.pwd / fname, code)
+                println("Done.")
+            }
         }
-        val fname = "test.ll"
-        os.write.over(os.pwd / fname, code)
     }
 
-    // @main
-    // def exec() = {
-    //     val externalFile = scala.io.Source
-    //         .fromResource("test2.txt")
-    //         .mkString
-    //     val ast = fastparse.parse(externalFile, All(_))
-    //     ast match {
-    //         case Parsed.Failure(label, idx, extra) => println(extra.traced.trace)
-    //      case Parsed.Success(value, index) => {
-    //         val fname = "test.fun"
-    //         val path = os.pwd / fname
-    //         val file = fname.stripSuffix("." ++ path.ext)
-    //         write()
-    //         os.proc("llc", "-filetype=obj", "--relocation-model=pic", file ++ ".ll").call()
-    //         os.proc("gcc", file ++ ".o", "-o", file ++ ".bin").call()
-    //         os.proc(os.pwd / (file ++ ".bin")).call(stdout = os.Inherit)
-    //      }
-    //     }
-    // }
+    @main
+    def compile(@arg(short = 'i', doc = "Input file name")
+                input: String,
+                @arg(doc = "Optimization level")
+                O: Option[Int],
+                @arg(short = 'o', doc = "Output file name")
+                output: Option[String]) = {
+        println(s"Parsing $input.txt...")
+        val ast = parse(input)
+        ast match {
+            case Parsed.Failure(label, idx, extra) => println(extra.traced.trace)
+            case Parsed.Success(value, index) => {
+                println("Compiling to LLVM...")
+                val code = compile_ast(ast.get.value)
+                val file = output.getOrElse("test")
+                os.write.over(os.pwd / (file + ".ll"), code)
+                val opt = O.getOrElse(0)
+                println(s"Compiling to $file.bin with optimization level -O$opt...")
+                os.proc("llc", "-filetype=obj", "--relocation-model=pic", s"-O${opt}", file + ".ll").call()
+                os.proc("gcc", file ++ ".o", "-o", file ++ ".bin").call()
+                println("Done.")
+            }
+        }
+    }
 }

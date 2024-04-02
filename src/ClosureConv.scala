@@ -42,7 +42,6 @@ class ClosureConv(counter: Counter) {
     def convert(e: KAnf): (KAnf, Option[Env]) = e match {
         case KFun(fnName, args, ret, body, in) => {
             val fvs = free_anf(body).filterNot(x => args.map(_._1).contains(x.s)).toList
-            println(s"The free variables in $fnName are $fvs")
 
             if fvs.isEmpty then {
                 glob_fns += fnName
