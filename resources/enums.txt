@@ -1,0 +1,15 @@
+enum Days = Mon | Tue | Wed | Thur | Fri;
+enum Time = AM | PM;
+
+def main() = {
+    val monday: Days = Days::Mon;
+    val evening: Time = Time::PM;
+    print(monday match {
+        case Days::Mon => evening match {
+            case Time::AM => 12.0
+            case Time::PM => 24.0
+        }
+        case _ => 0.0
+    });
+    0
+}

@@ -1,0 +1,18 @@
+struct Student = {
+    age: Int,
+    part_time: Bool,
+    avg_grade: Float
+};
+
+def is_first(s: Student): Bool =
+    if s.avg_grade >= 70.0 then
+        true
+    else
+        false;
+
+def main() = {
+    val st: Student = Student(20, false, 89.0);
+    print(st.avg_grade);
+    print(is_first(st));
+    0
+}

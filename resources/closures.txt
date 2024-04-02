@@ -1,0 +1,10 @@
+def makeIncrementer(x: Int): (Int) => Int = {
+    def incrementer(y: Int): Int = x + y;
+    incrementer
+};
+
+def main() = {
+    val incrementBy5: (Int) => Int = makeIncrementer(5);
+    print(incrementBy5(9));
+    0
+}
